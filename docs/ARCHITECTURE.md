@@ -1,6 +1,6 @@
 # Architecture
 
-This document explains how the DSH Updater Plugin works under the hood — perfect for contributors and curious users who want to understand the safety guarantees and data flow.
+This document explains how DeepSeek Updater works under the hood — perfect for contributors and curious users who want to understand the safety guarantees and data flow.
 
 ## Overview
 
