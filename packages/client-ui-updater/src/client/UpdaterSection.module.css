@@ -1,0 +1,563 @@
+/**
+ * Updater section — native DSH surface. Cards sit one elevation above the
+ * settings panel (layer-3), text resolves through the alias label tokens,
+ * and every state maps onto the product semantic colors (business/success/
+ * warn/error). Geometry mirrors the settings shell: 12px radii, 24px pills,
+ * 36px buttons (ui-primitives Button), code surfaces on the markdown code
+ * token.
+ * @module @deepseek-ai/dsh-client-ui-updater/client
+ */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px;
+}
+
+/* ── header: phase chip + repo ─────────────────────────────────────── */
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.phaseChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-3);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+}
+
+.repo {
+  min-width: 0;
+  flex: 1;
+  font-family: var(--ds-font-family-code);
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── hero panels ───────────────────────────────────────────────────── */
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 14px;
+  background: var(--dsw-alias-bg-layer-3);
+}
+
+.heroRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.heroIcon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+}
+
+.heroText {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.heroTitle {
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.heroBody {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--dsw-alias-label-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* State accents: a 3px left bar + a tinted icon chip per semantic. */
+.heroApply   { border-left: 3px solid var(--dsw-alias-state-warn-primary); }
+.heroRun     { border-left: 3px solid var(--dsw-alias-state-business-primary); }
+.heroSuccess { border-left: 3px solid var(--dsw-alias-state-success-primary); }
+.heroRestart { border-left: 3px solid var(--dsw-alias-state-warn-primary); }
+.heroConflict{ border-left: 3px solid var(--dsw-alias-state-warn-primary); }
+.heroError   { border-left: 3px solid var(--dsw-alias-state-error-primary); }
+.heroIdle    { border-left: 3px solid var(--dsw-alias-state-success-primary); }
+
+.iconApply    { color: var(--dsw-alias-state-warn-secondary); background: var(--dsw-alias-state-warn-tertiary); }
+.iconRun      { color: var(--dsw-alias-state-business-primary); background: var(--dsw-alias-state-business-tertiary); }
+.iconSuccess  { color: var(--dsw-alias-state-success-secondary); background: var(--dsw-alias-state-success-tertiary); }
+.iconRestart  { color: var(--dsw-alias-state-warn-secondary); background: var(--dsw-alias-state-warn-tertiary); }
+.iconConflict { color: var(--dsw-alias-state-warn-secondary); background: var(--dsw-alias-state-warn-tertiary); }
+.iconError    { color: var(--dsw-alias-state-error-secondary); background: var(--dsw-alias-state-error-primary); }
+
+/* ── version range chips ───────────────────────────────────────────── */
+
+.versionRange {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.versionChip {
+  font-family: var(--ds-font-family-code);
+  font-size: 12px;
+  line-height: 18px;
+  padding: 1px 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+}
+
+.versionArrow {
+  color: var(--dsw-alias-state-warn-secondary);
+  font-weight: 700;
+}
+
+/* ── plan badges ───────────────────────────────────────────────────── */
+
+.badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.badge {
+  font-size: 12px;
+  line-height: 18px;
+  padding: 1px 8px;
+  border: 1px solid var(--dsw-alias-state-business-primary);
+  border-radius: 999px;
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.badgeWarn {
+  border-color: var(--dsw-alias-state-warn-primary);
+  color: var(--dsw-alias-state-warn-label);
+}
+
+/* ── update-run panel: stepper + bar + log ─────────────────────────── */
+
+.stageTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  margin: 0 0 12px;
+}
+
+.stages {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stageRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.stageRail {
+  flex: none;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  padding-top: 3px;
+}
+
+.stageRow:not(:last-child) .stageRail::after {
+  content: '';
+  position: absolute;
+  top: 16px;
+  bottom: -16px;
+  left: 50%;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--dsw-alias-border-l3);
+}
+
+.stagePendingDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l3);
+}
+
+.stageBody {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.stageLabel {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.stageLabel.done {
+  color: var(--dsw-alias-state-success-secondary);
+}
+
+.stageMsg {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.stageMsg.active {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+/* Progress bar: 6px track, brand fill, light sweep while running. */
+.bar {
+  position: relative;
+  height: 6px;
+  margin: 2px 0;
+  border-radius: 3px;
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l1);
+  overflow: hidden;
+}
+
+.barFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--dsw-alias-state-business-primary), var(--dsw-static-blue-400));
+  transition: width 0.45s var(--ds-ease-in-out);
+  overflow: hidden;
+}
+
+.barFill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.28), transparent);
+  animation: barSweep 1.4s linear infinite;
+}
+
+@keyframes barSweep {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(100%); }
+}
+
+/* Live log: code surface, newest at the bottom, auto-follows. */
+.log {
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  background: var(--dsw-alias-markdown-code-block);
+  overflow: hidden;
+}
+
+.logHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.logTitle {
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.liveChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.liveDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-success-secondary);
+  animation: livePulse 1.6s ease-in-out infinite;
+}
+
+@keyframes livePulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+.logBody {
+  max-height: 168px;
+  overflow-y: auto;
+  padding: 8px 12px;
+  font-family: var(--ds-font-family-code);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.logLine {
+  display: flex;
+  gap: 10px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.logTime {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.logMsg {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.logLine[data-level='warn'] .logMsg { color: var(--dsw-alias-state-warn-label); }
+.logLine[data-level='error'] .logMsg { color: var(--dsw-alias-state-error-secondary); }
+.logLine[data-level='ok'] .logMsg { color: var(--dsw-alias-state-success-secondary); }
+
+/* Reassurance footnotes under the running panel. */
+.heroNote {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.heroNote svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+/* ── actions ───────────────────────────────────────────────────────── */
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+/* ── secondary cards ───────────────────────────────────────────────── */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card {
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: var(--dsw-alias-bg-layer-3);
+}
+
+.card h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 14px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.dl dt {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.dl dd {
+  margin: 0;
+  color: var(--dsw-alias-label-primary);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.muted {
+  margin: 4px 0;
+  font-size: 13px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.errorMsg {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--dsw-alias-state-error-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.conflictList {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.conflictList li {
+  font-family: var(--ds-font-family-code);
+  font-size: 12px;
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.risk {
+  border: 1px dashed var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin: 8px 0;
+  font-size: 13px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.fileList {
+  margin: 4px 0;
+  padding-left: 16px;
+}
+
+.fileList li {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.commitList {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.commitList li {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  padding: 4px 0;
+}
+
+.commitList code {
+  color: var(--dsw-alias-state-business-primary);
+  flex-shrink: 0;
+  font-family: var(--ds-font-family-code);
+}
+
+.backupList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.backupRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--dsw-alias-label-secondary);
+  padding: 5px 0;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+}
+
+.backupRow:first-child {
+  border-top: none;
+}
+
+.form {
+  display: grid;
+  gap: 10px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.field input[type='text'], .field input[type='number'] {
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.field input:focus {
+  outline: none;
+  border-color: var(--dsw-alias-state-business-primary);
+}
+
+.formActions {
+  margin-top: 4px;
+}
+
+.savedHint {
+  font-size: 12px;
+  color: var(--dsw-alias-state-success-secondary);
+}
+
+.savedHint.fail {
+  color: var(--dsw-alias-state-error-secondary);
+}
