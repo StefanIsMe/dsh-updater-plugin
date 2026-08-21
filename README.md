@@ -207,7 +207,7 @@ The suite includes: Bug-A e2e (dead-apply guard), Bug-B (500+ path classificatio
 
 ## 🤝 Feedback & Bugs
 
-This repository is **issues-only** — pull requests are not accepted (they are auto-closed). This keeps the plugin surface stable and auditable.
+This repository is **issues-only** — pull requests are not accepted. This keeps the plugin surface stable and auditable.
 
 - **Bug reports & feature requests:** [Open an Issue](../../issues) — use the *Bug report* or *Feature request* template.
 - **Security issues:** please use the *Bug report* template and mark it as security-sensitive.
