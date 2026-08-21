@@ -1,13 +1,13 @@
-# Install Guide — Agnostic
+# Install Guide — Agnostic (Pure Updater)
 
 This guide works on any machine without personal data. Replace placeholders like `C:\\Users\\you\\Projects\\my-app` with your own checkout path.
 
 ## Prerequisites
 
 - DeepSeek Harness checkout (https://github.com/deepseek-ai/deepseek-harness)
-- Node.js ≥18, pnpm, git, PowerShell 7+ (Windows) or pwsh on macOS/Linux
+- Node.js ≥18, pnpm, git
 
-## A. Standalone Git Cordis Plugin (`plugin/`)
+## Install
 
 1. Clone this repository:
 
@@ -16,22 +16,7 @@ This guide works on any machine without personal data. Replace placeholders like
    cd dsh-updater-plugin
    ```
 
-2. In DSH chat at http://127.0.0.1:3080, paste:
-
-   > Create a git plugin using files at <absolute-path-to-clone>/plugin/host.js and <absolute-path-to-clone>/plugin/client.js. Use pwsh on native paths, expose 11 git tools, show dashboard in Run card. Call cordis_inspect_list first.
-
-3. Approve the Client half when the Run card appears.
-
-Test:
-
-```
-git_status workdir="C:\\Users\\you\\Projects\\my-app"
-git_log workdir="C:\\Users\\you\\Projects\\my-app" limit=5
-```
-
-## B. Full Self-Updater (host + client)
-
-1. Copy packages into your harness checkout:
+2. Copy packages into your harness checkout:
 
    ```bash
    cp -r packages/host-updater <your-harness>/packages/host/updater
@@ -40,7 +25,7 @@ git_log workdir="C:\\Users\\you\\Projects\\my-app" limit=5
 
    Or add as local pnpm dependencies and patch your bundle's `cordis.patch.yml`.
 
-2. Patch the Host row:
+3. Patch the Host row:
 
    ```yaml
    add:
@@ -52,16 +37,16 @@ git_log workdir="C:\\Users\\you\\Projects\\my-app" limit=5
          autoApply: false
    ```
 
-3. Add the client package to your web-app bundle dependencies and import its entry.
+4. Add the client package to your web-app bundle dependencies and import its entry.
 
-4. Mount AI tools in `apps/cli/config/agent-presets/standard/agent.cordis.yml`:
+5. Mount AI tools in `apps/cli/config/agent-presets/standard/agent.cordis.yml`:
 
    ```yaml
    install:
      - package: "@deepseek-ai/dsh-host-updater/tools"
    ```
 
-5. Build and restart:
+6. Build and restart:
 
    ```bash
    pnpm -C packages/host/updater run build

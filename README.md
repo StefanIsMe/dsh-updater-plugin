@@ -6,7 +6,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)]()
 [![Node](https://img.shields.io/badge/Node-%3E%3D18-339933)]()
 
-> **Agnostic, draft-preserving self-update system for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) — plus a standalone Windows-native Git Cordis plugin.**
+> **Agnostic, draft-preserving self-update system for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness).**
 
 This repository publishes the complete source for the DSH self-updater that was previously embedded in a private fork. It is **fully agnostic**: no hardcoded user paths, no personal data, no machine-specific configuration. Anyone can clone, build, and install it on their own DSH deployment.
 
@@ -42,7 +42,7 @@ Browser half of the self-update system. Registers the **Updater** settings page 
 - **Consent-gated actions** — Apply, Restart, Restore each open a confirmation dialog; nothing destructive without a click
 - **Config editor** — auto-check toggles, poll interval, build command (persisted by host)
 - **Live updates** — subscribes to `updater/state` events and polls `status()` every 30s; progress (install/build tails) and conflict states render in real time
-- **AI Update flow (new)** — single **"Update with AI"** launcher: picks a model, creates a new chat session, prefills the `/updater` command, and navigates to it. All merging then happens through the agent — the agent may keep local, take upstream, or write a merged file and ask you questions mid-update. This replaces manual keep/take buttons as the primary surface while keeping the deterministic engine as the safe executor underneath.
+- **AI Update flow** — single **"Update with AI"** launcher: picks a model, creates a new chat session, prefills the `/updater` command, and navigates to it. All merging then happens through the agent — the agent may keep local, take upstream, or write a merged file and ask you questions mid-update. This replaces manual keep/take buttons as the primary surface while keeping the deterministic engine as the safe executor underneath.
 
 ### 3. Model Tools — the "Update DSH" Plugin Surface (`packages/host-updater/src/tools.ts`)
 Any chat session whose agent preset mounts `@deepseek-ai/dsh-host-updater/tools` can drive the pipeline via ordinary tool calls:
@@ -63,14 +63,6 @@ Any chat session whose agent preset mounts `@deepseek-ai/dsh-host-updater/tools`
 
 The gateway stays the **sole executor and safety net** (backup → stash-only-collisions → ff-only merge → draft restore → conflicts/restore).
 
-### 4. Windows Git Plugin (`plugin/`)
-A standalone **Cordis dynamic plugin** that exposes Windows-native `git` through `pwsh` — useful on its own and as a reference for building agnostic DSH plugins:
-
-- Every tool call is a fresh `pwsh -Command` — never `cd`, always pass `workdir` as a native Windows path (`C:\Users\you\Projects\app`)
-- Handles PowerShell single-quote escaping (`''` for `'`), sandbox awareness (`workspace-write` vs `danger-full-access`), truncation spill files, timeouts (30s default, 60s for push/pull)
-- **11 tools**: `git_status`, `git_log`, `git_diff`, `git_branch`, `git_add`, `git_commit`, `git_checkout`, `git_push`, `git_pull`, `git_stash`, `git_init`
-- **Client panel**: React dashboard in the Cordis *Run* card (`tool.view.cordis` key `self`) — input repo path, tabs for status/log/diff/branch, Refresh/Harness/Toplevel shortcuts, plus a sidebar footer hint
-
 ---
 
 ## 🚀 Quick Start
@@ -78,43 +70,20 @@ A standalone **Cordis dynamic plugin** that exposes Windows-native `git` through
 ### Prerequisites
 
 - **DSH** — a running DeepSeek Harness checkout (`http://127.0.0.1:3080`)
-- **Node.js ≥18**, **pnpm**, **git**, **PowerShell 7+**
+- **Node.js ≥18**, **pnpm**, **git**
 
-### Install the Git Plugin (agnostic dynamic plugin)
+### Install the Self-Updater
 
-This works on **any** DSH installation — Windows, macOS, Linux. The plugin auto-detects git + pwsh on the host machine; no hardcoded paths are needed.
+The host + client updater are **first-class DSH packages** (not a two-file dynamic plugin). To use them:
 
-**Option A — Ask the model (recommended):**
+1. Clone this repository:
 
-Paste into any DSH chat at `http://127.0.0.1:3080`:
+   ```bash
+   git clone https://github.com/StefanIsMe/dsh-updater-plugin.git
+   cd dsh-updater-plugin
+   ```
 
-> Create a git plugin for Windows using files at `<path-to-cloned-repo>/plugin/host.js` and `<path-to-cloned-repo>/plugin/client.js`. Interact with git via pwsh on native paths, expose 11 git tools, and show the dashboard in the Run card. Call `cordis_inspect_list` first per skill.
-
-The model will read both files, call `cordis_define` (plugin kind `new`, idPrefix `git`, name `Git Windows`), then `cordis_run`. If the Run card shows *awaiting-approval*, tick **single** (this version) or **double** (future versions) and Approve.
-
-**Option B — Manual:**
-
-1. `cordis_inspect_list` → confirm `shell` service exists
-2. `cordis_define { plugin:{kind:"new", idPrefix:"git"}, name:"Git Windows", purpose:"Interact with git on Windows via pwsh...", code:{ host:"<host.js contents>", client:"<client.js contents>" } }`
-3. `cordis_run { pluginId:"<from define>", packageId:"<from define>", mode:"run" }`
-4. Approve the Client half box → status *running* → tools available
-
-**Quick tests after install:**
-
-```text
-git_status workdir="C:\Users\you\Projects\my-app"          -> branch + file list
-git_log    workdir="C:\Users\you\Projects\my-app" limit=5  -> recent commits
-# In the Run card panel: type C:\Users\you\Projects\my-app -> Refresh
-# -> green "Working tree clean" or file list
-```
-
-> **Sandbox note:** If you see `[sandbox: file access denied under workspace-write]`, the repo is outside the workspace. Retry the *exact same* tool call with `sandbox_permissions` + justification — the approval prompt is how you consent. Each call is fresh `pwsh`; never rely on `cd`.
-
-### Install the Full Self-Updater
-
-The host + client updater are **first-class DSH packages**, not a two-file dynamic plugin. To use them:
-
-1. Clone this repo and copy the packages into your DSH checkout, or add them as pnpm workspaces:
+2. Copy the packages into your DSH checkout, or add them as pnpm workspaces:
 
    ```bash
    # in your deepseek-harness checkout
@@ -122,7 +91,7 @@ The host + client updater are **first-class DSH packages**, not a two-file dynam
    pnpm add file:../dsh-updater-plugin/packages/client-ui-updater
    ```
 
-2. Wire the host row (example `cordis.patch.yml` patch or add to your bundle):
+3. Wire the host row (example `cordis.patch.yml` patch or add to your bundle):
 
    ```yaml
    add:
@@ -134,24 +103,24 @@ The host + client updater are **first-class DSH packages**, not a two-file dynam
          autoApply: false
    ```
 
-3. Mount the client page (it registers `settings.section` `updater` via `@deepseek-ai/dsh-client-ui-updater`).
+4. Mount the client page (it registers `settings.section` `updater` via `@deepseek-ai/dsh-client-ui-updater`).
 
-4. Mount the AI tools in your agent preset (`apps/cli/config/agent-presets/standard/agent.cordis.yml`):
+5. Mount the AI tools in your agent preset (`apps/cli/config/agent-presets/standard/agent.cordis.yml`):
 
    ```yaml
    install:
      - package: "@deepseek-ai/dsh-host-updater/tools"
    ```
 
-5. Build:
+6. Build:
 
    ```bash
-   pnpm -C packages/host/updater run build
-   pnpm -C packages/client/ui-updater run build
+   pnpm -C packages/host-updater run build
+   pnpm -C packages/client-ui-updater run build
    pnpm run build:web
    ```
 
-6. Deploy: commit `.dsh/updater/config.json` with `autoApply: false`, restart DSH, and open **Settings → Updater**. You should see the status card + **Update with AI** button.
+7. Deploy: commit `.dsh/updater/config.json` with `autoApply: false`, restart DSH, and open **Settings → Updater**. You should see the status card + **Update with AI** button.
 
 ---
 
@@ -218,7 +187,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## 🗂️ Repository Topics
 
-`dsh-plugin` · `dsh` · `cordis` · `deepseek-harness` · `self-updater` · `git` · `windows` · `pwsh`
+`dsh-plugin` · `dsh` · `cordis` · `deepseek-harness` · `self-updater`
 
 ---
 

@@ -1,7 +1,7 @@
 {
   "name": "dsh-updater-plugin",
   "version": "0.1.0",
-  "description": "Agnostic draft-preserving self-update system for DeepSeek Harness — plus standalone Windows-native Git Cordis plugin",
+  "description": "Agnostic draft-preserving self-update system for DeepSeek Harness",
   "type": "module",
   "private": true,
   "keywords": [
@@ -9,10 +9,7 @@
     "dsh",
     "cordis",
     "deepseek-harness",
-    "self-updater",
-    "git",
-    "windows",
-    "pwsh"
+    "self-updater"
   ],
   "license": "MIT",
   "repository": {
