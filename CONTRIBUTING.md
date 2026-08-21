@@ -1,12 +1,12 @@
 # Contributing
 
-Thank you for your interest in DeepSeek Updater — we're glad you're here!
+Thank you for your interest in DeepSeek Harness Updater — we're glad you're here!
 
 ## How to contribute
 
 We love hearing from users. The fastest way to help improve the plugin is by opening an issue — whether you've found a bug, have a feature idea, or just want to share how you're using it.
 
-This repository is **issues-only** to keep DeepSeek Updater stable, auditable, and safe as a drop-in updater. Pull requests are automatically closed with guidance — but every issue is triaged by maintainers and shapes the roadmap.
+This repository is **issues-only** to keep DeepSeek Harness Updater stable, auditable, and safe as a drop-in updater. Pull requests are automatically closed with guidance — but every issue is triaged by maintainers and shapes the roadmap.
 
 ### What to do
 

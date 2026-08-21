@@ -1,4 +1,4 @@
-# DeepSeek Updater
+# DeepSeek Harness Updater
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![DSH](https://img.shields.io/badge/DSH-Harness-0f1419)](https://github.com/deepseek-ai/deepseek-harness)
@@ -10,7 +10,7 @@
 
 **The safest way to keep your [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) deployment current — without ever overwriting your local work.**
 
-DeepSeek Updater is a production-grade, draft-preserving self-update system for DeepSeek Harness (DSH) — built for every deployment. Whether you customize prompts, tweak tools, or run a heavily modified fork, it lets you pull upstream improvements confidently, with full visibility and zero surprises.
+DeepSeek Harness Updater is a production-grade, draft-preserving self-update system for DeepSeek Harness (DSH) — built for every deployment. Whether you customize prompts, tweak tools, or run a heavily modified fork, it lets you pull upstream improvements confidently, with full visibility and zero surprises.
 
 Works out of the box on **Windows, macOS, and Linux**. No hardcoded paths, no personal data, no lock-in — just clone, plug in, and update.
 
@@ -225,7 +225,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## 📄 License
 
-[MIT](LICENSE) — Copyright (c) 2026 DeepSeek Updater Contributors.
+[MIT](LICENSE) — Copyright (c) 2026 DeepSeek Harness Updater Contributors.
 
 ---
 
