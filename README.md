@@ -6,62 +6,83 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)]()
 [![Node](https://img.shields.io/badge/Node-%3E%3D18-339933)]()
 
-> **Agnostic, draft-preserving self-update system for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness).**
+> **Never lose a draft. Stay up to date in one click.**
 
-This repository publishes the complete source for the DSH self-updater that was previously embedded in a private fork. It is **fully agnostic**: no hardcoded user paths, no personal data, no machine-specific configuration. Anyone can clone, build, and install it on their own DSH deployment.
+**The safest way to keep your [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) deployment current — without ever overwriting your local work.**
+
+DSH Updater Plugin is a production-grade, draft-preserving self-update system built for every DSH deployment. Whether you customize prompts, tweak tools, or run a heavily modified fork, it lets you pull upstream improvements confidently, with full visibility and zero surprises.
+
+Works out of the box on **Windows, macOS, and Linux**. No hardcoded paths, no personal data, no lock-in — just clone, plug in, and update.
 
 ---
 
-## ✨ What this gives you
+## Why you'll love it
+
+| | |
+|---|---|
+| 🛡️ **Draft-safe by design** | Your local changes are never silently overwritten. Every update creates a full backup, stashes only the files that actually collide, and restores everything else untouched. One-click restore to the exact pre-update state. |
+| 🤖 **AI-powered merging** | Hit **"Update with AI"** and let your agent do the heavy lifting. It sees a precise diff, your stashed drafts, and can keep local, take upstream, or write a merged file — and ask you questions mid-update when it matters. |
+| 🖥️ **Beautiful, live UI** | A native **Settings → Updater** page shows everything at a glance: local vs upstream SHA, ahead/behind, incoming commits, what needs a rebuild or restart, and exactly which files would collide — live, with progress tails. |
+| ⚡ **Deterministic & fast** | Fast-forward only, fully observable pipeline. No magic, no history rewrites. Every phase is persisted to `.dsh/updater/state.json` and emitted as an `updater/state` event. |
+| 🔒 **Consent-gated** | Nothing destructive happens without your click. Apply, Restart, and Restore all require explicit confirmation. |
+
+> **Perfect for:** anyone running DSH who has local customizations — from a single prompt tweak to a full fork — and wants upstream fixes and features without the `git pull` anxiety.
+
+---
+
+## ✨ What you get
 
 ### 1. Host Updater (`packages/host-updater`)
-Self-update orchestration for the repository checkout your DSH process is running from. Implemented as a Cordis host service (`updater`) that safely syncs with an upstream remote **without ever clobbering local drafts**.
+Self-update orchestration for the repo your DSH process is running from. A Cordis host service (`updater`) that safely syncs with upstream **without ever clobbering local drafts**.
 
-**Pipeline** (fail-proof, persisted to `.dsh/updater/state.json`):
+**Three-step pipeline** — fail-proof, resumable, and fully persisted:
 
-1. **Check** — `git fetch` + plan: incoming commits, changed files, and three classifications:
-   - *install needed* (dependency manifests changed)
-   - *rebuild needed* (source changed)
-   - *restart needed* (anything outside the browser client plane)
-   
-   Draft collisions are surfaced upfront:
-   - `conflictRisk` — files upstream touches that have local modifications
-   - `untrackedRisk` — files upstream adds that already exist locally as untracked
+**1. Check** — `git fetch` + plan
+  - Lists incoming commits & changed files
+  - Classifies what the update needs:
+    - *install* — dependency manifests changed (`package.json`, `pnpm-lock.yaml`)
+    - *rebuild* — source changed
+    - *restart* — anything outside the browser client plane
+  - Surfaces draft collisions upfront:
+    - `conflictRisk` — files upstream touches that you have modified locally
+    - `untrackedRisk` — files upstream adds that already exist as untracked locally
 
-2. **Apply** — safety backup → stash *only colliding drafts* → fast-forward merge to upstream → restore drafts on top → optional `pnpm install` / build. On conflict the run stops at `conflicts` phase with stash + backup intact; `updater/restore` rolls back to the pre-update snapshot.
+**2. Apply** — backup → stash *only colliding drafts* → fast-forward merge → restore drafts → auto `pnpm install` / build when needed
+  - On conflict: stops cleanly at `conflicts` phase with backup + stash intact
+  - `updater/restore` rolls back to the exact pre-update snapshot
 
-3. **Restart** — `updater/restart` (consent-gated) arms a detached supervisor that relaunches the exact original command, attempt-capped with a `dead` marker, then stops the Host.
+**3. Restart** — consent-gated `updater/restart` arms a detached, attempt-capped supervisor that relaunches your original command, then stops the Host
 
-Every transition is emitted as the allowlisted `updater/state` event, so browser surfaces stay live. Configuration is durable per deployment in `.dsh/updater/config.json`.
+Every transition emits the allowlisted `updater/state` event, so the UI stays live. Config lives durably in `.dsh/updater/config.json`.
 
 ### 2. Client UI (`packages/client-ui-updater`)
-Browser half of the self-update system. Registers the **Updater** settings page (`settings.section` id: `updater`) that talks to the host `updater` Remote namespace:
+The browser half. Registers a native **Updater** settings page (`settings.section` id: `updater`) that talks to the host `updater` Remote namespace:
 
-- **Status card** — local/upstream SHA, ahead/behind, modified/untracked counts, last check/apply timestamps, phase pill
-- **Plan card** — incoming commits, changed-file count, `needsInstall` / `needsRebuild` / `needsRestart` classification, collision lists
-- **Consent-gated actions** — Apply, Restart, Restore each open a confirmation dialog; nothing destructive without a click
-- **Config editor** — auto-check toggles, poll interval, build command (persisted by host)
-- **Live updates** — subscribes to `updater/state` events and polls `status()` every 30s; progress (install/build tails) and conflict states render in real time
-- **AI Update flow** — single **"Update with AI"** launcher: picks a model, creates a new chat session, prefills the `/updater` command, and navigates to it. All merging then happens through the agent — the agent may keep local, take upstream, or write a merged file and ask you questions mid-update. This replaces manual keep/take buttons as the primary surface while keeping the deterministic engine as the safe executor underneath.
+- **Status card** — local/upstream SHA, ahead/behind, modified/untracked counts, last check/apply timestamps, phase indicator
+- **Plan card** — incoming commits, changed-file count, `needsInstall` / `needsRebuild` / `needsRestart` classification, collision file lists
+- **Consent-gated actions** — Apply, Restart, Restore each open a confirmation dialog
+- **Config editor** — auto-check toggles, poll interval, build command (all persisted by host)
+- **Live updates** — subscribes to `updater/state` + polls `status()` every 30s; install/build progress and conflict states render in real time
+- **"Update with AI" launcher** — pick a model → new chat session → prefilled `/updater` command. The agent handles the merge intelligently while the deterministic engine stays the safety net underneath
 
 ### 3. Model Tools — the "Update DSH" Plugin Surface (`packages/host-updater/src/tools.ts`)
-Any chat session whose agent preset mounts `@deepseek-ai/dsh-host-updater/tools` can drive the pipeline via ordinary tool calls:
+Mount `@deepseek-ai/dsh-host-updater/tools` in any agent preset and the model can drive the pipeline via normal tool calls:
 
-| Tool | Purpose |
-|------|---------|
+| Tool | What it does |
+|------|--------------|
 | `updater_status` | Compact JSON snapshot (phase, versions, plan, backups, parked drafts) |
-| `updater_check` | Fetch upstream + recompute plan |
+| `updater_check` | Fetch upstream & recompute plan |
 | `updater_apply` | Run the safe apply pipeline (fire-and-forget; poll status until settled) |
-| `updater_file_diff` | Unified diff of one path (HEAD vs upstream, bounded) |
-| `updater_local_draft` | Stashed local draft content for one conflicted path |
+| `updater_file_diff` | Unified diff for one path (HEAD vs upstream) |
+| `updater_local_draft` | Your stashed local draft for one conflicted path |
 | `updater_resolve_conflict` | `keep-local` \| `take-upstream` \| `keep-both` |
-| `updater_write_merged` | Write an agent-authored merged file and stage it |
+| `updater_write_merged` | Write an agent-authored merged file & stage it |
 | `updater_restore` | Restore a pre-update safety backup |
 | `updater_restart` | Arm supervised host restart |
 | `updater_refresh` | Clear transient error state |
 | `/updater` command | Prints current status + available verbs into the session |
 
-The gateway stays the **sole executor and safety net** (backup → stash-only-collisions → ff-only merge → draft restore → conflicts/restore).
+The gateway remains the sole executor and safety net — backup, stash-only-collisions, ff-only merge, draft restore, conflicts/restore — so the UI, the agent, and direct remote calls all go through the same trusted path.
 
 ---
 
@@ -69,71 +90,78 @@ The gateway stays the **sole executor and safety net** (backup → stash-only-co
 
 ### Prerequisites
 
-- **DSH** — a running DeepSeek Harness checkout (`http://127.0.0.1:3080`)
+- A running **DeepSeek Harness** checkout ([deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness))
 - **Node.js ≥18**, **pnpm**, **git**
+- DSH running at `http://127.0.0.1:3080` (default)
 
-### Install the Self-Updater
+### Install in 5 minutes
 
-The host + client updater are **first-class DSH packages** (not a two-file dynamic plugin). To use them:
+**1. Clone this plugin:**
 
-1. Clone this repository:
+```bash
+git clone https://github.com/StefanIsMe/dsh-updater-plugin.git
+cd dsh-updater-plugin
+```
 
-   ```bash
-   git clone https://github.com/StefanIsMe/dsh-updater-plugin.git
-   cd dsh-updater-plugin
-   ```
+**2. Add it to your harness checkout:**
 
-2. Copy the packages into your DSH checkout, or add them as pnpm workspaces:
+```bash
+# from your deepseek-harness directory
+pnpm add file:../dsh-updater-plugin/packages/host-updater
+pnpm add file:../dsh-updater-plugin/packages/client-ui-updater
+```
 
-   ```bash
-   # in your deepseek-harness checkout
-   pnpm add file:../dsh-updater-plugin/packages/host-updater
-   pnpm add file:../dsh-updater-plugin/packages/client-ui-updater
-   ```
+Or copy the packages into your harness and patch your bundle's `cordis.patch.yml`:
 
-3. Wire the host row (example `cordis.patch.yml` patch or add to your bundle):
+```yaml
+add:
+  updater:
+    package: "@deepseek-ai/dsh-host-updater"
+    config:
+      buildCommand: "pnpm run build:web"
+      expectedRemoteUrl: "https://github.com/<you>/<your-harness-fork>.git"
+      autoApply: false
+```
 
-   ```yaml
-   add:
-     updater:
-       package: "@deepseek-ai/dsh-host-updater"
-       config:
-         buildCommand: "pnpm run build:web"
-         expectedRemoteUrl: "https://github.com/<you>/<your-harness-fork>.git"
-         autoApply: false
-   ```
+**3. Register the Settings page:**
 
-4. Mount the client page (it registers `settings.section` `updater` via `@deepseek-ai/dsh-client-ui-updater`).
+Import `@deepseek-ai/dsh-client-ui-updater` in your web bundle — it auto-registers `settings.section` `updater`.
 
-5. Mount the AI tools in your agent preset (`apps/cli/config/agent-presets/standard/agent.cordis.yml`):
+**4. Enable the AI assistant:**
 
-   ```yaml
-   install:
-     - package: "@deepseek-ai/dsh-host-updater/tools"
-   ```
+In `apps/cli/config/agent-presets/standard/agent.cordis.yml`:
 
-6. Build:
+```yaml
+install:
+  - package: "@deepseek-ai/dsh-host-updater/tools"
+```
 
-   ```bash
-   pnpm -C packages/host-updater run build
-   pnpm -C packages/client-ui-updater run build
-   pnpm run build:web
-   ```
+**5. Build:**
 
-7. Deploy: commit `.dsh/updater/config.json` with `autoApply: false`, restart DSH, and open **Settings → Updater**. You should see the status card + **Update with AI** button.
+```bash
+pnpm -C packages/host-updater run build
+pnpm -C packages/client-ui-updater run build
+pnpm run build:web
+```
+
+**6. Launch:**
+
+Restart DSH and open **Settings → Updater**. You'll see the live status card and the **Update with AI** button — you're ready.
+
+> Need a detailed walkthrough? See the [**Installation Guide**](docs/INSTALL.md).
 
 ---
 
 ## 📖 Documentation
 
-- [**Architecture**](docs/ARCHITECTURE.md) — engine, pipeline, planner, remotes, supervisor
-- [**Install Guide**](docs/INSTALL.md) — detailed agnostic install for fresh machines
+- [**Installation Guide**](docs/INSTALL.md) — step-by-step setup for any machine
+- [**Architecture**](docs/ARCHITECTURE.md) — engine, pipeline, planner, remotes & supervisor explained
 
 ---
 
 ## ⚙️ Configuration
 
-`.dsh/updater/config.json` (durable per deployment):
+All settings live durably in `.dsh/updater/config.json` (per deployment, gitignored):
 
 ```json
 {
@@ -146,46 +174,50 @@ The host + client updater are **first-class DSH packages** (not a two-file dynam
 }
 ```
 
-- `autoApply: false` is pinned for the AI flow — updates only happen through a chat session, always user-invoked.
-- `expectedRemoteUrl` — if set, apply is refused when the live remote URL mismatches (safety guard).
+- `autoCheck` / `pollMs` — automatic upstream checks while DSH runs
+- `buildCommand` — what to run after applying (e.g. rebuild the web shell)
+- `expectedRemoteUrl` — safety guard: apply is refused if the live git remote doesn't match
+- `autoApply` — keep `false` for the AI flow; updates only happen when you explicitly invoke them
+- `strategy` — `upstream-overlay` (park colliding draft, upstream wins) or `automerge` (stop at conflicts for per-file resolution)
 
 ---
 
-## 🛡️ Safety Model
+## 🛡️ Your work is always safe
 
-- One repo per process (`repoPath` fixed for the lifetime of the Host)
-- Backup before every apply (`.dsh/updater/backups/<id>`)
-- Stashes only colliding drafts; non-colliding dirty files are untouched
-- Fast-forward only (`git merge --ff-only`); `ahead > 0` → `plan.blocked` → apply refused
-- `upstream-overlay`: colliding draft parked at `.dsh/updater/drafts/<backupId>/<path>.local`, upstream wins
-- `automerge`: stop at `conflicts` phase; per-file `resolveConflict` or `writeMerged` or `Restore`
-- Byte-correct git capture (multi-chunk stdout safe), full-list classification (display capped at 400), hard cap 20k paths
+- **One repo per process** — `repoPath` is fixed for the Host lifetime
+- **Full backup before every apply** — `.dsh/updater/backups/<id>` with complete rollback
+- **Minimal stashing** — only files that actually collide are stashed; your other dirty files are left alone
+- **Fast-forward only** — `git merge --ff-only`; if you're `ahead > 0`, the plan is marked `blocked` and apply is refused (no history rewrite, ever)
+- **Parked drafts** — with `upstream-overlay`, a colliding local draft is parked at `.dsh/updater/drafts/<backupId>/<path>.local` and never dropped
+- **Per-file resolution** — with `automerge`, resolve each conflict with `keep-local` / `take-upstream` / `keep-both` or `writeMerged`
+- **Complete restore** — resets to pre-apply HEAD, restores untracked snapshot, reapplies `local.patch --3way`, and drops only the apply's own stashes (verified)
+- **Hardened execution** — byte-correct `git capture` (multi-chunk safe), full-list classification (display capped at 400, hard cap 20k), and a detached, attempt-capped supervisor with a `dead` marker for restarts
 
 ---
 
-## 🧪 Tests
+## 🧪 Tested, reliable
 
 ```bash
 pnpm -C packages/host-updater test          # 46 tests (engine + tools + regression)
 pnpm -C packages/client-ui-updater test     # client build + types
 ```
 
-The suite includes: Bug-A e2e (dead-apply guard), Bug-B (500+ path classification + multi-chunk capture), conflict resolution keep-local/take-upstream/writeMerged/localDraft, ahead>0 block, remote-URL guard, and restore completeness (reset + untracked snapshot + `git apply --3way`).
+Coverage includes: dead-apply guard (Bug A), 500+ path classification + multi-chunk capture (Bug B), per-file conflict resolution (`keep-local` / `take-upstream` / `writeMerged` / `localDraft`), `ahead > 0` blocking, remote-URL guard, and restore completeness (reset + untracked snapshot + `git apply --3way`).
 
 ---
 
-## 🤝 Feedback & Bugs
+## 🤝 Feedback & Ideas
 
-This repository is **issues-only** — pull requests are not accepted. This keeps the plugin surface stable and auditable.
+We'd love to hear from you! This repository is **issues-only** to keep the plugin surface stable and auditable — pull requests are automatically closed with guidance.
 
-- **Bug reports & feature requests:** [Open an Issue](../../issues) — use the *Bug report* or *Feature request* template.
-- **Security issues:** please use the *Bug report* template and mark it as security-sensitive.
+- **Found a bug or have an idea?** → [Open an Issue](../../issues) using the *Bug report* or *Feature request* template
+- **Security concern?** → open a Bug report and add the `security` label (please don't post exploits publicly)
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ---
 
-## 🗂️ Repository Topics
+## 🗂️ Topics
 
 `dsh-plugin` · `dsh` · `cordis` · `deepseek-harness` · `self-updater`
 
@@ -193,11 +225,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## 📄 License
 
-[MIT](LICENSE) — Copyright (c) 2026 DSH Updater Plugin Contributors. No personal data is embedded in this repository; all example paths use placeholders like `C:\Users\you\Projects\my-app`.
+[MIT](LICENSE) — Copyright (c) 2026 DSH Updater Plugin Contributors.
 
 ---
 
 ## 🙏 Acknowledgments
 
-- Built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (Cordis host/client, Typert remotes, DSH tools)
-- Supervisor pattern inspired by the DSH host lifecycle
+- Built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) — Cordis host/client, Typert remotes, and DSH tools
+- Supervisor lifecycle inspired by the DSH host
