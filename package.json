@@ -1,0 +1,30 @@
+{
+  "name": "dsh-updater-plugin",
+  "version": "0.1.0",
+  "description": "Agnostic draft-preserving self-update system for DeepSeek Harness — plus standalone Windows-native Git Cordis plugin",
+  "type": "module",
+  "private": true,
+  "keywords": [
+    "dsh-plugin",
+    "dsh",
+    "cordis",
+    "deepseek-harness",
+    "self-updater",
+    "git",
+    "windows",
+    "pwsh"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/StefanIsMe/dsh-updater-plugin.git"
+  },
+  "author": "",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "echo \"See docs/INSTALL.md — build host-updater and client-ui-updater individually\"",
+    "test": "echo \"Run pnpm -C packages/host-updater test && pnpm -C packages/client-ui-updater test\""
+  }
+}

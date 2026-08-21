@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+lib/
+dist/
+*.tsbuildinfo
+.eslintcache
+*.log
+
+# Environment
+.env
+.env.local
+.DSH/
+.dsh/
+state.json
+*.pid
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temp
+tmp/
+temp/
+$null
+coverage/
+.nyc_output/
+
+# PII guard - never commit personal configs
+*.private.json
+secrets.json
