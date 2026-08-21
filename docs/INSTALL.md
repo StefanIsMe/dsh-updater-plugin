@@ -1,6 +1,6 @@
 # Installation Guide
 
-Get DeepSeek Updater running in your DeepSeek Harness deployment in under 5 minutes. This guide works on any machine — Windows, macOS, or Linux — with no personal data required. Just replace example paths like `C:\Users\you\Projects\my-app` with your own checkout.
+Get DeepSeek Harness Updater running in your DeepSeek Harness deployment in under 5 minutes. This guide works on any machine — Windows, macOS, or Linux — with no personal data required. Just replace example paths like `C:\Users\you\Projects\my-app` with your own checkout.
 
 ## Prerequisites
 
