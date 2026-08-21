@@ -1,6 +1,6 @@
 # Architecture
 
-This document explains how the DSH Updater Plugin is structured so a fresh machine can understand it without personal context.
+This document explains how the DSH Updater Plugin works under the hood — perfect for contributors and curious users who want to understand the safety guarantees and data flow.
 
 ## Overview
 
@@ -35,21 +35,21 @@ Client
 - **`plan.ts`** — `computePlan(fullList)` on the **full** changed set; `fileStats` / `blocked` pass-through; `parseNumstat`; `capPaths(paths, cap)` parameterized; display cap 400, hard cap 20k.
 - **`pipeline.ts`** — stash helpers (`pushDraftStashes` returns `{created, refs}`, untracked-first), overlay parking (`writeParkedDraft`), `unmergedPaths`, `restoreUntrackedSnapshot`, `applyLocalPatch` (`--3way`), `dropApplyStashes`, `runLongCommand`.
 - **`git.ts`** — single `capture()` primitive with correct byte accumulation (`size += buf.length`) and `maxBytes` capping, so multi-chunk stdout is never truncated.
-- **`index.ts` (Gateway)** — `UpdaterGateway extends TypertRemoteService`, Remotes: `updater/status`, `check`, `apply`, `restore`, `setConfig`, `restart`, `refresh`, plus `resolveConflict`, `fileDiff`, `writeMerged`, `localDraft`. Fixes Bug A (`runCheck`/`performCheck` split while holding the applying lock) and Bug B (classify on full list, cap only display). Strategy wiring incl. `parkedDrafts` + `remoteUrl`/`expectedRemoteUrl` guard + boot residual-conflict probe.
+- **`index.ts` (Gateway)** — `UpdaterGateway extends TypertRemoteService`, Remotes: `updater/status`, `check`, `apply`, `restore`, `setConfig`, `restart`, `refresh`, plus `resolveConflict`, `fileDiff`, `writeMerged`, `localDraft`. Strategy wiring incl. `parkedDrafts` + `remoteUrl`/`expectedRemoteUrl` guard + boot residual-conflict probe.
 - **`tools.ts`** — model-facing adapters (`defineTool` via `@deepseek-ai/dsh-tools`): `updater_status`, `check`, `apply`, `file_diff`, `local_draft`, `resolve_conflict`, `write_merged`, `restore`, `restart`, `refresh`; `tool:updater` system-prompt section; `/updater` command; mounted in `standard` agent preset. Thin wrappers — gateway is the sole executor.
 - **`relaunch.ts` + `supervisor/supervisor.mjs`** — detached supervisor that relaunches the original command, attempt-capped with a `dead` marker.
 
 ### `packages/client-ui-updater/src`
 
-- **`client/UpdaterSection.tsx`** — settings page: status/plan cards, consent dialogs for Apply/Restart/Restore, config editor (autoCheck/poll/build; **no** autoApply — removed per design), live subscription to `updater/state` + 30s poll fallback.
+- **`client/UpdaterSection.tsx`** — settings page: status/plan cards, consent dialogs for Apply/Restart/Restore, config editor (autoCheck/poll/build), live subscription to `updater/state` + 30s poll fallback.
 - **`client/updater-store.ts`** — Zustand-like local store bridging remotes to the UI.
 - **`client/locales.ts`** — en/zh strings.
 - **`client/UpdaterSection.module.css`** — scoped styles.
 
 ## Strategies
 
-- **`upstream-overlay`** — colliding local draft is parked under `.dsh/updater/drafts/<backupId>/<path>.local` (never dropped), upstream wins.
-- **`automerge`** — stash+pop; on content conflict stop at `conflicts` phase; per-file `resolveConflict` or `writeMerged` or `restore`.
+- **`upstream-overlay`** — colliding local draft is parked under `.dsh/updater/drafts/<backupId>/<path>.local` (never dropped), upstream wins. Recommended for most users.
+- **`automerge`** — stash+pop; on content conflict stop at `conflicts` phase; per-file `resolveConflict` or `writeMerged` or `restore`. Ideal when you want fine-grained control.
 
 ## Safety invariants
 

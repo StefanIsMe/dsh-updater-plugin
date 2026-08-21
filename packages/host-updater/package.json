@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-host-updater",
-  "description": "Self-update orchestration for a repository checkout: upstream sync, draft-preserving merge, restore, and supervised restart",
+  "description": "Draft-safe self-update engine for DeepSeek Harness — backup, plan, merge and restore with zero data loss",
   "version": "0.1.0-rc.5",
   "publishConfig": {
     "access": "public"

@@ -1,7 +1,7 @@
 {
   "name": "dsh-updater-plugin",
   "version": "0.1.0",
-  "description": "Agnostic draft-preserving self-update system for DeepSeek Harness",
+  "description": "Draft-safe, one-click self-update system for DeepSeek Harness — stay current without losing local work",
   "type": "module",
   "private": true,
   "keywords": [
@@ -9,7 +9,9 @@
     "dsh",
     "cordis",
     "deepseek-harness",
-    "self-updater"
+    "self-updater",
+    "auto-update",
+    "draft-preserving"
   ],
   "license": "MIT",
   "repository": {

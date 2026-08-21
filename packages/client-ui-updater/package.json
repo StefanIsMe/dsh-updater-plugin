@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-client-ui-updater",
-  "description": "Self-updater settings page: live status, apply plan, consent-gated apply/restart, restore, and runtime config for the host updater service",
+  "description": "Beautiful live Updater UI for DeepSeek Harness — status, plan, one-click apply and Update with AI",
   "version": "0.1.0-rc.5",
   "publishConfig": {
     "access": "public"
