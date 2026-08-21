@@ -1,8 +1,0 @@
-{
-  "plugin": { "kind": "new", "idPrefix": "git" },
-  "name": "Git Windows",
-  "purpose": "Interact with git on Windows via pwsh - native paths, credential manager, sandbox awareness",
-  "_note": "code.host / code.client are NOT inline here - read host.js and client.js and pass them as code.host / code.client strings to cordis_define. This JSON is a template only.",
-  "codeFiles": { "host": "host.js", "client": "client.js" },
-  "code": { "host": "see host.js - load file contents for cordis_define", "client": "see client.js - load file contents for cordis_define" }
-}

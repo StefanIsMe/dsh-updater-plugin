@@ -61,5 +61,4 @@ Client
 
 ## Discovery topics
 
-`dsh-plugin` · `dsh` · `cordis` — primary GitHub topics for search. Also `self-updater`, `deepseek-harness`.
-
+`dsh-plugin` · `dsh` · `cordis` — primary GitHub topics for search.
