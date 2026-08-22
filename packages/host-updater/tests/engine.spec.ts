@@ -7,7 +7,7 @@
  * @vitest-environment node
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { resolveUpdaterConfig } from '../src/config.ts'
@@ -157,8 +157,8 @@ describe('listBackups', () => {
       }))
       const backups = listBackups(config)
       expect(backups).toHaveLength(2)
-      expect(backups[0].id).toBe('2026-08-18T00-00-00-000Z')
-      expect(backups[0].headSha).toBe('c'.repeat(40))
+      expect(backups[0]!.id).toBe('2026-08-18T00-00-00-000Z')
+      expect(backups[0]!.headSha).toBe('c'.repeat(40))
     } finally {
       repo.cleanup()
     }

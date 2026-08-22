@@ -70,7 +70,12 @@ export async function createBackup(repo: string, config: UpdaterConfig, info: { 
   }
   writeFileSync(join(dir, 'manifest.json'), `${JSON.stringify(meta, null, 2)}\n`)
   if (config.backups) {
-    const patch = await runGit(repo, ['diff', '--full-index'], { timeoutMs: 60_000 })
+    // Bug G1 (2026-08-22): plain `git diff` captures UNSTAGED changes only, so
+    // drafts that were STAGED at backup time rode the stash but were absent
+    // from local.patch — restore then re-applied a partial patch, dropped the
+    // stash on success, and the staged drafts were gone with a green report.
+    // Diffing against HEAD captures the union (staged + unstaged).
+    const patch = await runGit(repo, ['diff', '--full-index', 'HEAD'], { timeoutMs: 60_000 })
     if (patch.code === 0) {
       try { writeFileSync(join(dir, 'local.patch'), patch.stdout) } catch { /* best effort */ }
     }

@@ -111,7 +111,7 @@ describe('parseCommits', () => {
       date: '2026-08-17T10:00:00+00:00',
       subject: 'Fix the thing',
     })
-    expect(rows[1].subject).toBe('<empty>')
+    expect(rows[1]!.subject).toBe('<empty>')
   })
 
   it('returns [] for empty input', () => {
