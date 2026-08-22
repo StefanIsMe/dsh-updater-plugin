@@ -211,3 +211,32 @@ describe('regression: guard — numstat', () => {
     expect(stats[1]!.added).toBe(0)
   })
 })
+
+// ── Bug F (2026-08-22): poll tick demoted 'conflicts' to idle mid-resolution ──
+// A fast-forward that stops at stash-pop conflicts leaves HEAD == upstream, so
+// the next check's up-to-date branch flipped the phase to idle while unmerged
+// paths remained — resolveConflict/writeMerged then refuse outside the
+// conflicts phase, stranding resolution until a full restore + re-apply.
+describe('regression: Bug F — poll clobbers conflicts phase', () => {
+  it('the up-to-date branch must consult unmergedPaths before demoting to idle', async () => {
+    const src = await import('node:fs').then(m => m.readFileSync('packages/host/updater/src/index.ts', 'utf8'))
+    const upToDateMark = src.indexOf('const upToDate =')
+    expect(upToDateMark).toBeGreaterThan(0)
+    // Take the branch from its marker to the idle demotion; the guard must sit
+    // between them so no idle transition can happen while drafts are unmerged.
+    const idleAfter = src.indexOf("this.setPhase('idle')", upToDateMark)
+    expect(idleAfter).toBeGreaterThan(upToDateMark)
+    const branch = src.slice(upToDateMark, idleAfter)
+    expect(branch).toMatch(/unmergedPaths\(/)
+    expect(branch).toMatch(/setPhase\('conflicts'\)/)
+    // And the refusal message must tell the caller resolution is still pending.
+    const afterIdle = src.slice(idleAfter, idleAfter + 400)
+    expect(afterIdle.includes('still need resolution') || branch.includes('still need resolution')).toBe(true)
+  })
+  it('probeResidualConflicts must stay phase-aware (conflicts/error only)', async () => {
+    const src = await import('node:fs').then(m => m.readFileSync('packages/host/updater/src/index.ts', 'utf8'))
+    const probeStart = src.indexOf('private async probeResidualConflicts')
+    const probeBlock = src.slice(probeStart, probeStart + 600)
+    expect(probeBlock).toMatch(/phase !== 'error' && this\.state\.phase !== 'conflicts'/)
+  })
+})

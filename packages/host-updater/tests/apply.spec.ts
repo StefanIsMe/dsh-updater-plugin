@@ -50,7 +50,7 @@ async function harness(overrides: Record<string, unknown> = {}): Promise<Harness
   saveUpdaterConfig(work.path, config)
   const gateway = new UpdaterGateway(ctx, config)
   const h: Harness = { gateway, ctx, work, upstream, cleanup: async () => {
-    try { ctx.dispose() } catch { /* best effort */ }
+    try { void ctx.fiber.dispose() } catch { /* best effort */ }
     work.cleanup()
     upstream.cleanup()
   } }
@@ -253,7 +253,7 @@ describe('plan on the full change set (Bug B regression)', () => {
       editAndCommit(h.upstream.path, 'package.json', '{ "name": "tmp", "version": "9.9.9" }\n', 'manifest bump')
       // Local draft on one of the LATE files (beyond the display cap).
       mkdirSync(join(h.work.path, 'src', 'generated'), { recursive: true })
-      writeFileSync(join(h.work.path, files[450]), 'console.log(local)\n')
+      writeFileSync(join(h.work.path, files[450]!), 'console.log(local)\n')
 
       const check = await h.gateway.check()
       expect(check.ok).toBe(true)
@@ -287,14 +287,14 @@ describe('upstream-overlay strategy', () => {
       expect(snap.phase).toBe('restart-pending')
       expect(await fileContent(h.work.path, 'src/main.ts')).toBe('console.log(upstream-v2)\n')
       expect(snap.parkedDrafts).toHaveLength(1)
-      expect(snap.parkedDrafts[0].path).toBe('src/main.ts')
-      expect(snap.parkedDrafts[0].stashRef).not.toBeNull()
+      expect(snap.parkedDrafts[0]!.path).toBe('src/main.ts')
+      expect(snap.parkedDrafts[0]!.stashRef).not.toBeNull()
       // No unmerged entries remain after the overlay resolution.
       const res = await runGit(h.work.path, ['diff', '--name-only', '--diff-filter=U'], { timeoutMs: 15_000 })
       expect(res.code).toBe(0)
       expect(res.stdout.trim()).toBe('')
       // The parked draft file exists on disk under .dsh/updater/drafts/.
-      const parkedAbs = join(h.work.path, '.dsh', 'updater', snap.parkedDrafts[0].parkedFile)
+      const parkedAbs = join(h.work.path, '.dsh', 'updater', snap.parkedDrafts[0]!.parkedFile)
       const { readFileSync } = await import('node:fs')
       expect(readFileSync(parkedAbs, 'utf8')).toBe('console.log(local-draft)\n')
     } finally {

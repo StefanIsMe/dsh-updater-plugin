@@ -301,6 +301,20 @@ export class UpdaterGateway extends TypertRemoteService {
         this.state.progress = null
         this.state.pendingRestart = false
         this.state.error = null
+        // Bug F (2026-08-22): a fast-forward that stopped at stash-pop
+        // conflicts leaves HEAD equal to upstream while the index still holds
+        // unmerged drafts. Demoting the phase to idle here stranded
+        // resolution — resolveConflict/writeMerged refuse outside the
+        // conflicts phase — so the hourly poll silently disabled the escape
+        // hatches mid-resolution. Unmerged paths mean the state is NOT idle:
+        // keep/restore the conflicts phase, refresh the file list, and say so.
+        const unmerged = await unmergedPaths(repoPath)
+        if (unmerged.length > 0) {
+          this.state.conflictedFiles = [...new Set([...this.state.conflictedFiles, ...unmerged])]
+          if (this.state.phase !== 'conflicts') this.setPhase('conflicts')
+          this.log(`check: up to date but ${unmerged.length} conflicted draft(s) await resolution`)
+          return { ok: false, message: `Up to date, but ${unmerged.length} conflicted draft(s) still need resolution.` }
+        }
         this.log('check: up to date')
         this.setPhase('idle')
         return { ok: true, message: 'Up to date.' }
@@ -637,6 +651,7 @@ export class UpdaterGateway extends TypertRemoteService {
       // 4 — re-apply the full pre-apply tracked-draft diff (covers stashed AND
       //     never-stashed drafts; the reset above discarded both).
       const patch = await applyLocalPatch(repoPath, stateDir, backupId)
+      if (!patch.ok) this.log(`restore: ${patch.message}`)
       if (patch.ok && patch.message === 'no patch') {
         // Backups disabled: fall back to popping the apply's own stashes.
         if (this.state.stashCount > 0) await unstashN(repoPath, this.state.stashCount)
@@ -651,7 +666,43 @@ export class UpdaterGateway extends TypertRemoteService {
             this.state.conflictedFiles = popped.conflicts
           }
         }
-        this.log(`restore: ${patch.message}`)
+      }
+      // Bug G2 (2026-08-22): restore is complete only when the index holds no
+      // unmerged entries. A --3way patch failure or a refused stash pop leaves
+      // stage records behind while the caller gets a success message
+      // (incident: six UU paths under "Restored the pre-update state").
+      // Recover every unresolved path from the recorded apply stash — the
+      // authoritative pre-apply snapshot of each colliding draft — falling
+      // back to HEAD when no stash holds it.
+      let residue = await unmergedPaths(repoPath)
+      for (const p of residue) {
+        let draft: string | null = null
+        for (const ref of this.state.stashRefs) {
+          const blob = await runGit(repoPath, ['show', `${ref}:${p}`], { timeoutMs: 15_000 })
+          if (blob.code === 0) { draft = blob.stdout; break }
+        }
+        if (draft !== null) {
+          const dst = join(repoPath, ...p.split('/'))
+          mkdirSync(dirname(dst), { recursive: true })
+          writeFileSync(dst, draft, 'utf8')
+          this.log(`restore: recovered draft ${p} from the apply stash`)
+        } else {
+          this.log(`restore: no stash draft for ${p}; resetting to HEAD`)
+        }
+        const settle = draft !== null
+          ? await runGit(repoPath, ['add', '--', p], { timeoutMs: 30_000 })
+          : await runGit(repoPath, ['checkout', 'HEAD', '--', p], { timeoutMs: 30_000 })
+        if (settle.code !== 0) this.log(`restore: could not settle ${p}`)
+      }
+      residue = await unmergedPaths(repoPath)
+      if (residue.length > 0) {
+        // Fail loud instead of reporting success over a broken index. The
+        // physical stash is intentionally preserved for manual recovery.
+        const shortList = residue.slice(0, 5).join(', ') + (residue.length > 5 ? ', …' : '')
+        const msg = `Restore incomplete: ${residue.length} path(s) still unmerged (${shortList}). The apply stash is preserved for manual recovery.`
+        this.state.error = msg
+        this.setPhase('error')
+        return { ok: false, message: msg }
       }
       this.state.stashCount = 0
       this.state.stashRefs = []
@@ -662,9 +713,17 @@ export class UpdaterGateway extends TypertRemoteService {
       const extra: string[] = []
       if (untracked.restored > 0) extra.push(`${untracked.restored} untracked file(s) restored`)
       if (patch.ok && patch.message !== 'no patch') extra.push(patch.message)
+      if (!patch.ok) extra.push(`warning: local patch did not apply cleanly (${patch.message})`)
       const message = `Restored the pre-update state from the safety backup.${extra.length > 0 ? ` ${extra.join(' · ')}.` : ''}`
       this.state.lastResult = { ok: true, at: new Date().toISOString(), message }
       this.log('restore: ok')
+      // Bug G2 companion: refresh the snapshot fields so callers reading
+      // status right after restore see the restored reality (currentSha,
+      // dirty/untracked counts), not values captured before the reset.
+      this.state.currentSha = await resolveHead(repoPath).catch(() => null)
+      const scanAfter = await scanWorkingTree(repoPath)
+      this.state.dirtyCount = scanAfter.dirtyTracked.length
+      this.state.untrackedCount = scanAfter.untracked.length
       this.state.phase = 'idle'
       this.state.plan = null
       this.pub()
@@ -929,7 +988,15 @@ export class UpdaterGateway extends TypertRemoteService {
     }
   }
 
-  /** Bounded unified diff of one path between HEAD and upstream (plan detail). */
+  /**
+   * Bounded unified diff of one path between HEAD and upstream (plan detail).
+   *
+   * Bug H (2026-08-22): after a fast-forward that stopped at stash-pop
+   * conflicts, HEAD equals upstream and this diff was always empty — exactly
+   * while an agent is resolving conflicts and needs to see what upstream did.
+   * During the conflicts phase with a known pre-apply backup, diff from the
+   * backup head instead, so the incoming change becomes visible again.
+   */
   @Remote('fileDiff')
   async fileDiff(path: string): Promise<UpdaterFileDiff> {
     if (path.length === 0 || path.startsWith('-') || path.includes('..')) {
@@ -937,9 +1004,14 @@ export class UpdaterGateway extends TypertRemoteService {
     }
     const { repoPath, remoteName, branch } = this.config
     const upstreamRef = `${remoteName}/${branch}`
+    let baseRef = 'HEAD'
+    if (this.state.phase === 'conflicts' && this.state.backupId !== null) {
+      const meta = await readBackupMeta(repoPath, this.state.backupId)
+      if (meta?.headSha) baseRef = meta.headSha
+    }
     const res = await runGit(
       repoPath,
-      ['diff', '--no-color', '--unified=8', 'HEAD', upstreamRef, '--', path],
+      ['diff', '--no-color', '--unified=8', baseRef, upstreamRef, '--', path],
       { timeoutMs: 30_000, maxBytes: 512 * 1024 },
     )
     if (res.code !== 0) return { ok: false, message: res.stderr.trim() || 'diff failed', diff: null }

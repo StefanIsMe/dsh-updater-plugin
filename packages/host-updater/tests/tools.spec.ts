@@ -52,7 +52,7 @@ async function harness(): Promise<Harness> {
   await ctx.plugin(UpdaterGateway, config)
   await ctx.plugin(updaterTools)
   const h: Harness = { ctx, work, upstream, cleanup: async () => {
-    try { await ctx.stop() } catch { /* best effort */ }
+    try { await ctx.fiber.dispose() } catch { /* best effort */ }
     work.cleanup()
     upstream.cleanup()
   } }
