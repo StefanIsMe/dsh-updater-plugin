@@ -109,7 +109,15 @@ export function apply(ctx: Context): void {
       + 'take-upstream, keep-both) or write an authored merge with updater_write_merged. '
       + 'Never drop a local draft silently — park it or ask the user. Restore with '
       + 'updater_restore when something goes wrong; restart with updater_restart when the phase '
-      + 'is restart-pending. Confirm destructive steps with the user when uncertain.',
+      + 'is restart-pending. Confirm destructive steps with the user when uncertain. '
+      + 'MANDATORY POST-UPDATE AUDIT (2026-08-22, after rc.2 silently dropped wiring): before declaring success or calling updater_restart you MUST: '
+      + '(0) setConfig autoCheck:false before apply and re-enable after; '
+      + '(1) git grep -n -E "^(<{7}|={7}$|>{7})" over the ENTIRE repo including root tsconfigs and resolve markers; '
+      + '(2) verify packages/bundle/web-app/cordis.patch.yml still has updater+ui-updater rows; '
+      + '(3) verify api/remotes lists updater/state and mounts updaterRemote; '
+      + '(4) pnpm install if needed then node scripts/rebuild-dsh-client.mjs -> 0; '
+      + '(5) vitest every touched package -> green; '
+      + '(6) report all steps then restart. Skipping a step is failure even if updater reports success.',
   })
 
   ctx.tools.register(defineTool({
