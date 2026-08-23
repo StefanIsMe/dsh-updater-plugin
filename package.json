@@ -1,7 +1,7 @@
 {
   "name": "dsh-updater-plugin",
   "version": "0.1.0",
-  "description": "Draft-safe, one-click self-update system for DeepSeek Harness — stay current without losing local work",
+  "description": "Draft-safe self-update + paperclip file pipeline for DeepSeek Harness — stay current without losing local work, send any document to any LLM",
   "type": "module",
   "private": true,
   "keywords": [
@@ -11,7 +11,13 @@
     "deepseek-harness",
     "self-updater",
     "auto-update",
-    "draft-preserving"
+    "draft-preserving",
+    "file-attachment",
+    "paperclip",
+    "docx",
+    "pdf",
+    "document-extraction",
+    "llm"
   ],
   "license": "MIT",
   "repository": {
