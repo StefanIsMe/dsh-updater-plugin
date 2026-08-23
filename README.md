@@ -84,6 +84,14 @@ Mount `@deepseek-ai/dsh-host-updater/tools` in any agent preset and the model ca
 
 The gateway remains the sole executor and safety net — backup, stash-only-collisions, ff-only merge, draft restore, conflicts/restore — so the UI, the agent, and direct remote calls all go through the same trusted path.
 
+### 4. Paperclip File Pipeline — send documents to any LLM API (`packages/llm-pi-ai` + `packages/paperclip-intake`)
+Attach a **.docx, .pdf, .xlsx, .pptx, .md, or any text file** through the composer's paperclip and its **contents reach your model's endpoint** — not just its name.
+
+- **Magic-byte intake routing** — raster-signature files enter the vision pipeline; everything else lands durably as content-addressed bytes with download cards
+- **Request-time extraction** — docx (WordprocessingML), pdf (pdf.js text layer), xlsx (shared strings + named sheets), pptx (slides in deck order), OpenDocument, EPUB, and ~50 plain-text formats are flattened into delimited `<attached-file>` blocks on every provider request
+- **Budgeted & safe** — a per-route `maxRequestFileTextChars` budget (default 200k chars) truncates and degrades gracefully instead of failing requests; unrepresentable payloads keep an honest name-only note
+- **Verified live** against an OpenCode Zen endpoint with real documents — full story in [docs/paperclip-file-pipeline.md](docs/paperclip-file-pipeline.md)
+
 ---
 
 ## 🚀 Quick Start
