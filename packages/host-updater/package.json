@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-host-updater",
   "description": "Self-update orchestration for a repository checkout: upstream sync, draft-preserving merge, restore, and supervised restart",
-  "version": "0.1.2-alpha.3",
+  "version": "0.1.2-alpha.4",
   "publishConfig": {
     "access": "public"
   },

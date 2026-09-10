@@ -526,8 +526,12 @@ export class UpdaterGateway extends TypertRemoteService {
       this.progress('merge', ahead > 0
         ? `Merging fork (ahead ${ahead}) with upstream ${upstreamRef}…`
         : `Fast-forwarding to ${upstreamRef}…`)
+      // --no-verify: husky/lefthook gates judge the repository as a whole, so a
+      // locally drifted doc or fixture would strand the merge before any repair
+      // step could run. The updater's own checks and the resolve paths (also
+      // --no-verify) own this merge; ordinary commits keep their hooks.
       const mergeArgv = ahead > 0
-        ? ['merge', '--no-edit', upstreamRef]
+        ? ['merge', '--no-edit', '--no-verify', upstreamRef]
         : ['merge', '--ff-only', upstreamRef]
       const mergeRes = await runGit(repoPath, mergeArgv, { timeoutMs: 120_000 })
       if (mergeRes.code !== 0) {
@@ -711,7 +715,7 @@ export class UpdaterGateway extends TypertRemoteService {
       if (operation.stage === 'restart') return this.runRestart()
       if (this.state.conflictedFiles.length) return { ok: false, message: 'Read the conflict context, preserve local behavior, write the repairs, then resume.' }
       if (readMergeHead(this.config.repoPath)) {
-        const commit = await runGit(this.config.repoPath, ['commit', '--no-edit'])
+        const commit = await runGit(this.config.repoPath, ['commit', '--no-edit', '--no-verify'])
         if (commit.code !== 0) return { ok: false, message: 'The repaired merge could not be committed. Fix the reported repository checks and resume.' }
       }
       if (operation.stage === 'merge') {
@@ -721,7 +725,7 @@ export class UpdaterGateway extends TypertRemoteService {
         }
         const merged = await runGit(this.config.repoPath, ['merge-base', '--is-ancestor', operation.targetSha, 'HEAD'])
         if (merged.code !== 0) {
-          const result = await runGit(this.config.repoPath, ['merge', '--no-edit', operation.targetSha], { timeoutMs: 120_000 })
+          const result = await runGit(this.config.repoPath, ['merge', '--no-edit', '--no-verify', operation.targetSha], { timeoutMs: 120_000 })
           this.state.conflictedFiles = await unmergedPaths(this.config.repoPath)
           if (result.code !== 0) {
             this.state.error = this.state.conflictedFiles.length ? null : result.stderr

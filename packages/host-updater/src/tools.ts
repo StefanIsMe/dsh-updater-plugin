@@ -108,7 +108,8 @@ export function apply(ctx: Context): void {
       + 'Use updater_status for progress. For conflicts use updater_conflict_context, preserve local functionality, '
       + 'write a compatible result with updater_write_merged, then resume with updater_start. '
       + 'Handle routine technical decisions without asking the user. Never delete or disable local plugins to pass checks. '
-      + 'The gateway owns verification; do not claim success until the operation is complete. Explain outcomes in plain language.',
+      + 'The gateway owns verification; do not claim success until the operation is complete. Explain outcomes in plain language. '
+      + 'Spend effort in proportion: the pipeline already runs install and build, so poll updater_status instead of re-running whole suites, and test only the surfaces the incoming commits touched.',
   })
 
   ctx.tools.register(defineTool({

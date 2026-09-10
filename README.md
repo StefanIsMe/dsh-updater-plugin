@@ -30,6 +30,18 @@ Update DSH using updater_start. I authorize backups, compatibility repairs, test
 
 The workflow pins the fetched commit, backs up local state, merges upstream, restores saved changes by their recorded stash IDs, runs the configured checks, and verifies the restarted application. Conflicts require a capable tool-using agent. No model or provider is selected by the updater.
 
+### Updating cheaply
+
+The update pipeline already runs `pnpm install` and the build itself, so an agent does not need to re-run the full test suite to trust an update. Saying **"update DSH cheaply"** tells the agent to poll `updater_status` to completion and verify only the surfaces the incoming commits actually touched, instead of re-running whole suites and burning API tokens.
+
+```text
+Update DSH cheaply. Call updater_start and let the pipeline do the backup, merge, install and build; poll updater_status until the phase settles. Skip the full test suite and spend effort in proportion — verify only the surfaces the incoming commits touched. Handle routine technical decisions yourself and restart when the update needs it. Tell me the result in plain language.
+```
+
+This is safe because the gateway, not the agent, owns completion: an update is not reported successful until the restarted application passes its configured post-restart verification, and recovery data is retained if any check fails. Asking for a cheap update changes how much the agent re-tests, never whether the update is verified.
+
+A full-fidelity update is still available by omitting "cheaply" — useful after a large upstream jump or when you have changed many local files.
+
 Recovery copies and stashes can contain private user data. They stay in the user's DSH installation and must not be uploaded to this repository. See [SECURITY.md](SECURITY.md).
 
 ## Development and scope
