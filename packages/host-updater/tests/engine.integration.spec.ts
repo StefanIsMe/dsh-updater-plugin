@@ -49,6 +49,33 @@ describe('runGit basics', () => {
       repo.cleanup()
     }
   })
+
+  it('merges a real three-way fork merge cleanly when both sides advanced', async () => {
+    const upstream = makeTempRepo('master')
+    const work = makeTempRepo('master')
+    try {
+      gitIn(work.path, ['remote', 'add', 'origin', upstream.path])
+      gitIn(work.path, ['fetch', 'origin'])
+      gitIn(work.path, ['reset', '--hard', 'origin/master'])
+      // Fork commits locally (ahead > 0).
+      editAndCommit(work.path, 'src/fork-file.ts', 'console.log(fork)\n', 'fork commit')
+      // Upstream advances on a different file.
+      editAndCommit(upstream.path, 'src/upstream-only.ts', 'console.log(upstream)\n', 'upstream advance')
+      gitIn(work.path, ['fetch', 'origin'])
+      // Fork-merge strategy: --no-edit (not --ff-only) succeeds with ahead > 0.
+      const merged = await runGit(work.path, ['merge', '--no-edit', 'origin/master'], { timeoutMs: 60_000 })
+      expect(merged.code).toBe(0)
+      expect(await isClean(work.path)).toBe(true)
+      // Both sides' content present after the merge.
+      expect(gitIn(work.path, ['show', 'HEAD:src/fork-file.ts'])).toContain('fork')
+      expect(gitIn(work.path, ['show', 'HEAD:src/upstream-only.ts'])).toContain('upstream')
+      // HEAD is now a merge commit ahead of upstream.
+      expect(gitIn(work.path, ['rev-list', '--count', 'origin/master..HEAD'])).toBe('2')
+    } finally {
+      upstream.cleanup()
+      work.cleanup()
+    }
+  }, 60_000)
 })
 
 describe('working-tree scans', () => {
@@ -114,7 +141,7 @@ describe('parseCommandLine + runLongCommand', () => {
 
   it('runs a real short command and streams lines', async () => {
     const lines: string[] = []
-    const result = await runLongCommand(process.cwd(), ['node', '-e', 'console.log("hello");console.log("world")'], (line) => lines.push(line), { timeoutMs: 30_000 })
+    const result = await runLongCommand(process.cwd(), ['node', '-e', 'console.log("hello");console.log("world")'], line => lines.push(line), { timeoutMs: 30_000 })
     expect(result.ok).toBe(true)
     expect(lines.join(' ')).toContain('hello')
     expect(lines.join(' ')).toContain('world')

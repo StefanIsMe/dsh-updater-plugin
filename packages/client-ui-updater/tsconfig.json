@@ -18,22 +18,28 @@
       "path": "../locale"
     },
     {
-      "path": "../runtime"
-    },
-    {
       "path": "../ui-settings"
     },
     {
       "path": "../ui-slots"
     },
     {
-      "path": "../../test-support/client-runtime"
+      "path": "../ui-renderer"
+    },
+    {
+      "path": "../ui-workspace"
     },
     {
       "path": "../../runtime-diagnostics/invariants"
     },
     {
       "path": "../../api/remotes/tsconfig.client.json"
+    },
+    {
+      "path": "../../api/session-controller/tsconfig.client.json"
+    },
+    {
+      "path": "../../api/workspace-controller/tsconfig.client.json"
     },
     {
       "path": "../../host/updater"

@@ -7,6 +7,8 @@
  */
 
 export interface UpdaterKeyMap {
+  'notice.available': string
+  'notice.dismiss': string
   'nav': string
   'phase.idle': string
   'phase.checking': string
@@ -71,6 +73,8 @@ export interface UpdaterKeyMap {
 
 /** English dictionary. */
 export const en: UpdaterKeyMap = {
+  'notice.available': 'Update available',
+  'notice.dismiss': 'Dismiss',
   'nav': 'Updater',
   'phase.idle': 'Up to date',
   'phase.checking': 'Checking for updates',
@@ -94,9 +98,9 @@ export const en: UpdaterKeyMap = {
   'status.progress': 'Progress',
   'status.git': 'git',
   'launch.title': 'Update DSH with AI',
-  'launch.body': 'Open a chat session that drives the updater: it checks for updates, reviews the plan, applies the update, and resolves any conflicts with your local changes — asking you when it needs a decision. You can pick the model in the session.',
-  'launch.button': 'Update with AI',
-  'launch.command': 'Load the DSH updater and update DSH: check for updates (updater_check), review the plan, apply the update (updater_apply), and resolve any conflicts by comparing my local changes with upstream (updater_local_draft, updater_file_diff, updater_resolve_conflict, updater_write_merged). Ask me anything you need, then restart when ready (updater_restart).',
+  'launch.body': 'Open an update chat with your chosen model. DSH handles backups, compatibility repairs, checks and restart for you.',
+  'launch.button': 'Update DSH now',
+  'launch.command': 'Update DSH using updater_start. I authorize backups, compatibility repairs, tests and restart for this update. Preserve all my plugins, settings, conversations and local changes. Handle technical decisions yourself. If repairs are needed, use updater_conflict_context and updater_write_merged, then updater_start to resume. Poll updater_status until verification finishes. Do not claim success if tests fail or are unavailable. Explain progress and the final outcome in plain language.',
   'restore.command': 'Load the DSH updater and restore the pre-update safety backup listed in updater_status (backups[].id): call updater_restore with that id. Confirm the backup id with the user first. Nothing should be lost — the restore resets to the pre-update commit, copies back untracked files, and re-applies local drafts.',
   'launch.busy': 'An update is already running — watch this chat or wait for it to settle.',
   'plan.title': 'Incoming update',
@@ -158,9 +162,9 @@ export const zh: UpdaterKeyMap = {
   'status.progress': '进度',
   'status.git': 'git',
   'launch.title': '用 AI 更新 DSH',
-  'launch.body': '打开一个驱动更新器的对话会话：它会检查更新、查看计划、应用更新，并在你的本地改动发生冲突时解决冲突——需要决定时会询问你。你可以在会话中选择模型。',
-  'launch.button': '用 AI 更新',
-  'launch.command': '加载 DSH 更新器并更新 DSH：先检查更新（updater_check），查看计划，应用更新（updater_apply），并用 updater_local_draft、updater_file_diff、updater_resolve_conflict、updater_write_merged 对比我的本地改动与上游来解决任何冲突。有任何需要都可以问我，完成后用 updater_restart 重启。',
+  'launch.body': '使用所选模型打开更新对话。DSH 自动完成备份、兼容性修复、测试和重启。',
+  'launch.button': '立即更新 DSH',
+  'launch.command': '使用 updater_start 更新 DSH。我授权本次更新的备份、兼容性修复、测试和重启。保留所有插件、设置、对话和本地改动。自行处理技术细节；需要修复时使用 updater_conflict_context 和 updater_write_merged，然后 updater_start 继续。通过 updater_status 跟踪验证；测试失败或不可用时不可宣称成功。用简单语言报告进展和结果。',
   'restore.command': '加载 DSH 更新器并恢复 updater_status 中 backups[] 列出的更新前安全备份（backups[].id）：调用 updater_restore 并传入该 id。先与用户确认备份 id。恢复会重置到更新前提交、复制回未跟踪文件、并重新应用本地草稿——任何内容都不会丢失。',
   'launch.busy': '已有更新正在运行——请在本会话中查看或等待其完成。',
   'plan.title': '传入更新',

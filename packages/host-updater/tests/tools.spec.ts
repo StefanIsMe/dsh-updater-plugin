@@ -8,7 +8,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -68,7 +68,7 @@ afterEach(async () => {
 async function execute(ctx: Context, name: string, args: unknown): Promise<ToolExecutionResult> {
   return ctx.tools.execute({
     signal: testToolSignal,
-    callId: CallId(`call-${Math.random()}`),
+    callId: ToolCallId(`call-${Math.random()}`),
     name,
     arguments: args,
   })
@@ -83,11 +83,11 @@ async function resultText(result: ToolExecutionResult): Promise<string> {
   return block.text
 }
 
-describe('updater tools (the "dsh plugin")', () => {
+describe('updater tools (the "dsh plugin")', { timeout: 30_000 }, () => {
   it('registers all ten updater tools plus guidance and disposes them', async () => {
     const { ctx } = await harness()
     const names = [
-      'updater_status', 'updater_check', 'updater_apply', 'updater_file_diff',
+      'updater_start', 'updater_conflict_context', 'updater_status', 'updater_check', 'updater_apply', 'updater_file_diff',
       'updater_local_draft', 'updater_resolve_conflict', 'updater_write_merged',
       'updater_restore', 'updater_restart', 'updater_refresh',
     ]

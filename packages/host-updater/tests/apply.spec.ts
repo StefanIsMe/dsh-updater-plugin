@@ -128,7 +128,8 @@ describe('apply end-to-end (Bug A regression)', () => {
       expect(workFile(h.work.path, 'src/main.ts')).toBe('console.log(local-draft)\n')
       expect(await fileContent(h.work.path, 'src/upstream-only.ts')).toBe('console.log(upstream)\n')
       expect(snap.error).toBeNull()
-      expect(snap.lastResult?.ok).toBe(true)
+      expect(snap.lastResult?.ok).toBe(false)
+      expect(snap.operation?.stage).toBe('restart')
     } finally {
       await h.cleanup()
     }
@@ -303,33 +304,92 @@ describe('upstream-overlay strategy', () => {
   }, 90_000)
 })
 
-describe('ahead > 0 block', () => {
-  it('refuses to apply when the local repo has divergent commits', async () => {
+describe('ahead > 0 fork-merge (FORK UPDATE 2026-09-01)', () => {
+  it('reports up to date when behind 0 even with local fork commits (no phantom update)', async () => {
     const h = await harness()
     try {
-      // Create a local commit ahead of upstream.
+      // Local fork commit ahead of upstream; upstream NOT advanced.
       writeFileSync(join(h.work.path, 'local-commit.txt'), 'mine\n')
-      commitAll(h.work.path, 'local commit')
+      commitAll(h.work.path, 'local fork commit')
+
+      const check = await h.gateway.check()
+      expect(check.ok).toBe(true)
+      // behind 0 + fork commits ahead = UP TO DATE, not update-available.
+      // The old code required upstreamSha === HEAD, which a fork never
+      // satisfies — that was the phantom "0.1.2-alpha.3 → 0.1.2-alpha.3" card.
+      const snap = h.gateway.status()
+      expect(snap.behind).toBe(0)
+      expect(snap.ahead).toBe(1)
+      expect(snap.phase).toBe('idle')
+      expect(snap.plan).toBeNull()
+    } finally {
+      await h.cleanup()
+    }
+  }, 90_000)
+
+  it('fork-merges cleanly when the fork is ahead AND upstream advanced (no collisions)', async () => {
+    const h = await harness()
+    try {
+      // Fork commit on its own file.
+      writeFileSync(join(h.work.path, 'local-commit.txt'), 'mine\n')
+      commitAll(h.work.path, 'local fork commit')
+      // Upstream advances on a file the fork never touched.
       editAndCommit(h.upstream.path, 'src/upstream-only.ts', 'console.log(upstream)\n', 'upstream advance')
 
       const check = await h.gateway.check()
       expect(check.ok).toBe(true)
       const plan = h.gateway.status().plan
-      expect(plan?.blocked).toMatch(/Local commits exist/)
+      // NOT blocked anymore — ahead > 0 is a fork-merge, not a refusal.
+      expect(plan?.blocked).toBeNull()
 
-      // apply() is fire-and-forget: it returns {ok:true} before the run starts.
-      // The refusal surfaces through status().error once the run settles.
       const apply = await h.gateway.apply()
       expect(apply.ok).toBe(true)
       const snap = await settle(h.gateway)
-      expect(snap.error).toMatch(/Local commits exist/)
-      // Nothing moved.
-      expect(snap.phase).toBe('update-available')
-      expect(await headOf(h.work.path)).not.toBe(await headOf(h.upstream.path))
+      expect(snap.phase).toBe('restart-pending')
+      // The merge commit contains BOTH the upstream tip and the fork commit.
+      expect(gitIn(h.work.path, ['log', '--format=%s', '-1'])).toMatch(/Merge/)
+      expect(gitIn(h.work.path, ['show', 'HEAD:local-commit.txt'])).toContain('mine')
+      expect(gitIn(h.work.path, ['show', 'HEAD:src/upstream-only.ts'])).toContain('upstream')
+      expect(snap.error).toBeNull()
+      expect(snap.lastResult?.ok).toBe(false)
+      expect(snap.operation?.stage).toBe('restart')
     } finally {
       await h.cleanup()
     }
   }, 90_000)
+
+  it('stops at conflicts when the fork merge itself collides, and resolves via take-upstream', async () => {
+    const h = await harness()
+    try {
+      // Fork commits a change to a tracked file.
+      writeFileSync(join(h.work.path, 'src/main.ts'), 'console.log(fork-committed)\n')
+      commitAll(h.work.path, 'fork commit touches main')
+      // Upstream ALSO commits a different change to the same file → merge conflict.
+      editAndCommit(h.upstream.path, 'src/main.ts', 'console.log(upstream-v2)\n', 'upstream touches the same file')
+
+      const check = await h.gateway.check()
+      expect(check.ok).toBe(true)
+      expect(h.gateway.status().plan?.blocked).toBeNull()
+
+      const apply = await h.gateway.apply()
+      expect(apply.ok).toBe(true)
+      const snap = await settle(h.gateway)
+      // The fork merge stops at conflicts; HEAD has NOT moved yet.
+      expect(snap.phase).toBe('conflicts')
+      expect(snap.conflictedFiles).toContain('src/main.ts')
+
+      // take-upstream resolves the merge in upstream's favor and completes.
+      const resolve = await h.gateway.resolveConflict('src/main.ts', 'take-upstream')
+      expect(resolve.ok).toBe(true)
+      const after = await settle(h.gateway)
+      expect(after.phase).toBe('restart-pending')
+      expect(workFile(h.work.path, 'src/main.ts')).toBe('console.log(upstream-v2)\n')
+      // The merge completed: upstream's commit is now an ancestor of HEAD.
+      gitIn(h.work.path, ['merge-base', '--is-ancestor', 'origin/master', 'HEAD'])
+    } finally {
+      await h.cleanup()
+    }
+  }, 120_000)
 })
 
 describe('remote URL guard', () => {
@@ -401,4 +461,37 @@ describe('restore completeness', () => {
       await h.cleanup()
     }
   }, 90_000)
+})
+
+describe('resumable model workflow', () => {
+  it('reads conflict sides, preserves the merged draft and starts a second update without replaying the old stash', async () => {
+    const h = await harness()
+    try {
+      writeFileSync(join(h.work.path, 'src/main.ts'), 'console.log("local")\n')
+      editAndCommit(h.upstream.path, 'src/main.ts', 'console.log("upstream")\n', 'first update')
+      await h.gateway.start()
+      const first = await settle(h.gateway)
+      expect(first.phase).toBe('conflicts')
+      const context = await h.gateway.conflictContext('src/main.ts')
+      expect(context.draft).toContain('local')
+      expect(context.incoming).toContain('upstream')
+      const merged = 'console.log("local", "upstream")\n'
+      await h.gateway.writeMerged('src/main.ts', merged)
+      expect(readFileSync(join(h.work.path, 'src/main.ts'), 'utf8')).toBe(merged)
+      const { readOperation, saveOperation } = await import('../src/workflow.ts')
+      const op = readOperation(h.work.path)!
+      expect(op.appliedDraftRefs).toHaveLength(1)
+      // The supervisor publishes this checkpoint after checking the replacement app.
+      saveOperation(h.work.path, { ...op, stage: 'complete', checks: [{ name: 'post-restart', status: 'passed', detail: 'fixture verified' }] })
+      editAndCommit(h.upstream.path, 'src/next.ts', 'console.log("next")\n', 'second update')
+      await h.gateway.start()
+      const second = await settle(h.gateway)
+      expect(second.phase).toBe('restart-pending')
+      expect(second.error).toBeNull()
+      expect(second.operation?.targetSha).not.toBe(op.targetSha)
+      expect(readFileSync(join(h.work.path, 'src/main.ts'), 'utf8')).toBe(merged)
+      expect(second.stashRefs).toEqual([])
+      expect(gitIn(h.work.path, ['stash', 'list'])).toContain('updater:')
+    } finally { await h.cleanup() }
+  }, 120_000)
 })

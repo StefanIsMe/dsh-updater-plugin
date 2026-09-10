@@ -1,116 +1,55 @@
-// DSH self-updater supervised restart helper. The HOST writes `arm.json` and
-// `spawn.json` BEFORE spawning this file, then the host exits. This supervisor
-// keeps a replacement DSH alive while the arm exists, clears the arm once the
-// child has been alive for `clearAfterMs`, and writes `dead` after exhausting
-// `maxAttempts`. Everything lands in `restart.log`.
-
-import { readFileSync, writeFileSync, existsSync, rmSync, appendFileSync } from 'node:fs'
+// Restart the configured DSH profile and publish completion only after its application check passes.
+import { readFileSync, writeFileSync, existsSync, unlinkSync, appendFileSync, renameSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
-
-const stateDir = process.argv[2]
-if (typeof stateDir !== 'string' || stateDir.length === 0) {
-  process.exit(0)
-}
-
-const logPath = join(stateDir, 'restart.log')
-function log (text) {
-  try { appendFileSync(logPath, `${new Date().toISOString()} ${text}\n`) } catch { /* best effort */ }
-}
-
-const armPath = join(stateDir, 'arm.json')
-const spawnPath = join(stateDir, 'spawn.json')
-if (!existsSync(armPath) || !existsSync(spawnPath)) {
-  // Nothing armed, no directions: never start anything.
-  process.exit(0)
-}
-
-let payload
-try {
-  payload = JSON.parse(readFileSync(spawnPath, 'utf8'))
-} catch {
-  log('supervisor: corrupt spawn.json; exiting')
-  process.exit(0)
-}
-
-const cmd = Array.isArray(payload.cmd) && payload.cmd.length > 0 ? payload.cmd.map(String) : null
-const cwd = typeof payload.cwd === 'string' && payload.cwd.length > 0 ? payload.cwd : process.cwd()
-const clearAfterMs = typeof payload.clearAfterMs === 'number' ? payload.clearAfterMs : 20_000
-const maxAttempts = Math.max(1, typeof payload.maxAttempts === 'number' ? payload.maxAttempts : 3)
-const verifyUrl = typeof payload.verifyUrl === 'string' && payload.verifyUrl.length > 0 ? payload.verifyUrl : 'http://127.0.0.1:3080/'
-const verifyMarker = typeof payload.verifyMarker === 'string' && payload.verifyMarker.length > 0 ? payload.verifyMarker : 'dsh-client-ui-updater'
-if (cmd === null) {
-  log('supervisor: no launch command; exiting')
-  process.exit(0)
-}
-
-/** Prove the web UI actually serves: HTTP 200 + a mounted client plugin row + no boot error banner. */
-async function verifyUi () {
-  try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 8000)
-    const res = await fetch(verifyUrl, { signal: controller.signal })
-    clearTimeout(timer)
-    if (!res.ok) {
-      log(`supervisor: verify ${verifyUrl} -> HTTP ${res.status}`)
-      return false
-    }
-    const body = await res.text()
-    if (!body.includes(verifyMarker)) {
-      log(`supervisor: verify failed — boot manifest missing marker ${verifyMarker}`)
-      return false
-    }
-    if (body.includes('Failed to load plugins')) {
-      log('supervisor: verify failed — "Failed to load plugins" banner present')
-      return false
-    }
-    log(`supervisor: UI verified (${verifyMarker} present, no boot banner)`)
-    return true
-  } catch (error) {
-    log(`supervisor: verify fetch failed: ${String(error)}`)
-    return false
+import { setTimeout as sleep } from 'node:timers/promises'
+const dir = process.argv[2]
+if (!dir) process.exit(1)
+const arm = join(dir, 'arm.json'), operationPath = join(dir, 'operation.json')
+if (!existsSync(arm)) process.exit(0)
+const spec = JSON.parse(readFileSync(join(dir, 'spawn.json'), 'utf8'))
+const log = text => appendFileSync(join(dir, 'restart.log'), `${new Date().toISOString()} ${text}\n`)
+const publish = (file, value) => { const tmp = `${file}.${process.pid}.tmp`; writeFileSync(tmp, JSON.stringify(value, null, 2)+'\n'); renameSync(tmp, file) }
+function record(ok, detail) {
+  if (existsSync(operationPath)) {
+    const op = JSON.parse(readFileSync(operationPath, 'utf8'))
+    op.checks = op.checks.filter(c => c.name !== 'post-restart')
+    op.checks.push({ name: 'post-restart', status: ok ? 'passed' : 'failed', detail })
+    op.stage = ok ? 'complete' : 'restart'
+    publish(operationPath, op)
   }
+  if (ok) { if (existsSync(arm)) unlinkSync(arm); if (existsSync(join(dir,'dead'))) unlinkSync(join(dir,'dead')) }
+  else writeFileSync(join(dir,'dead'), detail+'\n')
+  log(detail)
 }
-
-function clearArm () {
-  try { rmSync(armPath) } catch { /* best effort */ }
-}
-function markDead () {
-  try { writeFileSync(join(stateDir, 'dead'), new Date().toISOString()) } catch { /* best effort */ }
-}
-
-let attempts = 0
-function attempt () {
-  attempts += 1
-  const child = spawn(cmd[0], cmd.slice(1), {
-    cwd,
-    detached: true,
-    stdio: 'ignore',
-    env: process.env,
-    windowsHide: true,
-  })
-  log(`supervisor: attempt ${attempts}/${maxAttempts}: ${cmd.join(' ')}`)
-  child.on('error', (err) => {
-    log(`supervisor: launch error: ${String(err)}`)
-  })
-  const timer = setTimeout(async () => {
-    const ok = await verifyUi()
-    if (ok) {
-      clearArm()
-      log(`supervisor: arm cleared after ${clearAfterMs} ms — child left running`)
-    } else {
-      log('supervisor: UI verification failed — killing child for retry')
-      try { child.kill() } catch { /* best effort */ }
-    }
-  }, clearAfterMs)
-  child.on('exit', () => {
-    clearTimeout(timer)
-    if (existsSync(armPath)) {
-      if (attempts < maxAttempts) attempt()
-      else markDead()
-    } else {
-      log('supervisor: arm absent — exiting')
-    }
+if (!Array.isArray(spec.verifyCommand) || !spec.verifyCommand.length) { record(false, 'No application verification command configured'); process.exit(1) }
+function alive(pid) { try { process.kill(pid, 0); return true } catch { return false } }
+// The old host must release its resources before a replacement binds them.
+for (let i=0; spec.parentPid && alive(spec.parentPid) && i<120; i++) await sleep(500)
+if (spec.parentPid && alive(spec.parentPid)) { record(false, 'Previous host did not stop; no duplicate host launched'); process.exit(1) }
+function check() {
+  return new Promise(resolve => {
+    const child = spawn(spec.verifyCommand[0], spec.verifyCommand.slice(1), {cwd:spec.cwd, windowsHide:true, stdio:'ignore'})
+    let timedOut = false
+    const timer = setTimeout(() => {timedOut=true; child.kill()}, 30000)
+    child.once('error', () => {clearTimeout(timer); resolve(false)})
+    child.once('close', code => {clearTimeout(timer); resolve(code===0 && !timedOut)})
   })
 }
-attempt()
+let verified=false
+for (let attempt=1; attempt<=spec.maxAttempts; attempt++) {
+  const child=spawn(spec.cmd[0], spec.cmd.slice(1), {cwd:spec.cwd, detached:true, windowsHide:true, stdio:'ignore'})
+  let ended=false
+  child.once('error', () => {ended=true})
+  child.once('exit', () => {ended=true})
+  log(`Launch attempt ${attempt}/${spec.maxAttempts}`)
+  for (let i=0; i<24 && !ended; i++) {
+    await sleep(5000)
+    if (!ended && await check()) {record(true,'Restarted application passed verification'); verified=true; break}
+  }
+  child.unref()
+  if (verified) break
+  if (!ended) {record(false,'Application check failed; replacement left running for diagnosis, recovery data retained'); break}
+  if (attempt===spec.maxAttempts) record(false,'Replacement exited before verification; launch attempts exhausted')
+}
+process.exitCode=verified?0:1

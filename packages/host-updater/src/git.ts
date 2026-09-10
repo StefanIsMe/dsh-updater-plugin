@@ -9,7 +9,17 @@
 
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+
+/** Resolve Git metadata for ordinary and linked worktree checkouts. */
+function gitDirectory(repoPath: string): string {
+  const path = join(repoPath, '.git')
+  try {
+    const match = readFileSync(path, 'utf8').match(/^gitdir: (.+)\s*$/)
+    if (match) return resolve(repoPath, match[1]!.trim())
+  } catch { /* An ordinary checkout has a directory, not a gitdir file. */ }
+  return path
+}
 
 /** Marker file/directory names that mean git is mid-operation. */
 const IN_PROGRESS_MARKERS = ['MERGE_HEAD', 'rebase-merge', 'rebase-apply', 'CHERRY_PICK_HEAD', 'REVERT_HEAD'] as const
@@ -17,7 +27,7 @@ const IN_PROGRESS_MARKERS = ['MERGE_HEAD', 'rebase-merge', 'rebase-apply', 'CHER
 /** Whether the repo has a merge/rebase/cherry-pick in progress (synchronous probe). */
 export function hasGitOperationInProgress(repoPath: string): string | null {
   for (const marker of IN_PROGRESS_MARKERS) {
-    if (existsSync(join(repoPath, '.git', marker))) return marker
+    if (existsSync(join(gitDirectory(repoPath), marker))) return marker
   }
   // Worktree checkouts use a `.git` file; the real git dir differs. Best-effort:
   return null
@@ -25,7 +35,7 @@ export function hasGitOperationInProgress(repoPath: string): string | null {
 
 /** Raw MERGE_HEAD content (the in-flight merge target), or null. */
 export function readMergeHead(repoPath: string): string | null {
-  const marker = join(repoPath, '.git', 'MERGE_HEAD')
+  const marker = join(gitDirectory(repoPath), 'MERGE_HEAD')
   if (!existsSync(marker)) return null
   try {
     return readFileSync(marker, 'utf8').split('\n')[0]?.trim() || null

@@ -47,8 +47,12 @@ export const UpdaterConfigSchema = z.object({
   installDeps: z.boolean().default(true),
   /** Run the repo build when source changed. */
   buildEnabled: z.boolean().default(true),
-  /** Exact build command, as argv words — NOTE: "pnpm run build" is BROKEN on this deployment (pre-existing package errors). The safe default is "node scripts/rebuild-dsh-client.mjs" (or "pnpm run build:web"). See REGRESSIONS.md Bug D. */
-  buildCommand: z.string().default('node scripts/rebuild-dsh-client.mjs'),
+  /** Build command for this checkout; quoted arguments and ordered && steps are supported. */
+  buildCommand: z.string().default('pnpm run build'),
+  /** Deployment checks run after building and before a restart. Empty means no extra checks. */
+  verifyCommand: z.string().default(''),
+  /** Required authenticated application check run by the supervisor after restarting. */
+  postRestartCommand: z.string().default(''),
   /** Override for the supervised restart command; null = re-exec the current invocation. */
   launchCommand: z.union([z.array(z.string()), z.const(null)]).default(null),
   /** Supervisor respawn attempts before giving up. */
@@ -68,10 +72,6 @@ export type UpdaterConfig = Schemastery.TypeT<typeof UpdaterConfigSchema>
 function normalizeConfig(config: UpdaterConfig): UpdaterConfig {
   if (config.launchCommand === undefined) config.launchCommand = null
   if (config.expectedRemoteUrl === undefined) config.expectedRemoteUrl = null
-  // REGRESSION GUARD — buildCommand "pnpm run build" is document-broken on this deployment (pre-existing local-package TS errors cause the aggregate tsc -b to fail). The updater must never try to run it on apply — it would always report "Build failed" and leave the merge in restart-pending. Migrate stale configs automatically.
-  if (typeof config.buildCommand === 'string' && config.buildCommand.trim() === 'pnpm run build') {
-    config.buildCommand = 'node scripts/rebuild-dsh-client.mjs'
-  }
   // REGRESSION GUARD — autoApply was removed from the UI (2026-08-19 user decision). The engine still has the field for safety, but any persisted true must be treated as false unless the operator deliberately re-enables it via an explicit config edit. This prevents a stale config from silently auto-applying on the next poll after an upstream merge that reintroduces the flag.
   if (config.autoApply === true) {
     // Keep the stored value but force the runtime view to false when the guard file says so; the invariant companion will surface this. For now, clamp here to prevent silent auto-apply on next restart.

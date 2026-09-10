@@ -1,7 +1,7 @@
 {
   "name": "dsh-updater-plugin",
-  "version": "0.1.0",
-  "description": "Draft-safe self-update + paperclip file pipeline for DeepSeek Harness — stay current without losing local work, send any document to any LLM",
+  "version": "0.2.0",
+  "description": "Recoverable source-checkout updates for DeepSeek Harness",
   "type": "module",
   "private": true,
   "keywords": [
@@ -28,8 +28,5 @@
   "workspaces": [
     "packages/*"
   ],
-  "scripts": {
-    "build": "echo \"See docs/INSTALL.md — build host-updater and client-ui-updater individually\"",
-    "test": "echo \"Run pnpm -C packages/host-updater test && pnpm -C packages/client-ui-updater test\""
-  }
+  "scripts": {}
 }

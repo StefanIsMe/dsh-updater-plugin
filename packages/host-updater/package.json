@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-host-updater",
-  "description": "Draft-safe self-update engine for DeepSeek Harness — backup, plan, merge and restore with zero data loss",
-  "version": "0.1.0-rc.5",
+  "description": "Self-update orchestration for a repository checkout: upstream sync, draft-preserving merge, restore, and supervised restart",
+  "version": "0.1.2-alpha.3",
   "publishConfig": {
     "access": "public"
   },
@@ -50,7 +50,7 @@
     "lib/typert.host.d.ts",
     "lib/typert.remote-client.js",
     "lib/typert.remote-client.d.ts",
-    "supervisor/supervisor.mjs"
+    "supervisor/*.mjs"
   ],
   "license": "MIT",
   "dependencies": {
@@ -65,7 +65,8 @@
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/dsh-system-prompt": "workspace:^",
     "@deepseek-ai/dsh-tools": "workspace:^",
-    "@deepseek-ai/dsh-typert-protocol": "workspace:^"
+    "@deepseek-ai/dsh-typert-protocol": "workspace:^",
+    "@deepseek-ai/dsh-agent": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
@@ -75,7 +76,7 @@
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/dsh-system-prompt": "workspace:^",
     "@deepseek-ai/dsh-tools": "workspace:^",
-    "@deepseek-ai/dsh-typert-protocol": "workspace:^"
-  },
-  "author": ""
+    "@deepseek-ai/dsh-typert-protocol": "workspace:^",
+    "@deepseek-ai/dsh-agent": "workspace:^"
+  }
 }

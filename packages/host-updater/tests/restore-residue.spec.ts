@@ -23,12 +23,8 @@ import { runGit, resolveHead } from '../src/git.ts'
 import { applyLocalPatch, dropApplyStashes, unmergedPaths, createBackup } from '../src/pipeline.ts'
 import { stateDirOf } from '../src/config.ts'
 
-const FILES = ["a.ts","b.ts","c.ts","d.ts","e.ts","f.ts","g.ts","h.ts"]
+const FILES = ['a.ts','b.ts','c.ts','d.ts','e.ts','f.ts','g.ts','h.ts']
 const STAGED = ['b.ts', 'c.ts', 'd.ts', 'e.ts']
-
-function draft(repo: string, f: string): string {
-  return readFileSync(join(repo, 'src', f), 'utf8')
-}
 
 async function incidentRepo() {
   const repo = makeTempRepo('master')
@@ -38,7 +34,7 @@ async function incidentRepo() {
   for (const f of FILES) writeFileSync(join(repo.path, 'src', f), 'base-' + f + String.fromCharCode(10))
   gitIn(repo.path, ['add', '-A'])
   gitIn(repo.path, ['commit', '-m', 'base'])
-  const base = await resolveHead(repo.path)
+  const base = (await resolveHead(repo.path)) as string
   // drafts on every file; FIRST FOUR get STAGED (the backup gap)
   for (const f of FILES) writeFileSync(join(repo.path, 'src', f), 'base-' + f + String.fromCharCode(10) + 'draft-' + f + String.fromCharCode(10))
   for (const f of STAGED) gitIn(repo.path, ['add', join('src', f)])
@@ -81,5 +77,5 @@ describe('Bug G2 - restore ends clean and truthful', () => {
     } finally {
       repo.cleanup()
     }
-  });
-});
+  }, 60_000)
+})

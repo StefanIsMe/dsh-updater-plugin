@@ -126,12 +126,16 @@ export interface UpdaterConfigView {
   readonly installDeps: boolean
   readonly buildEnabled: boolean
   readonly buildCommand: string
+  readonly verifyCommand: string
+  readonly postRestartCommand: string
   readonly launchCommand: readonly string[] | null
   readonly maxRestartAttempts: number
 }
 
 /** Point-in-time snapshot served by the updater Remote and pushed on every transition. */
 export interface UpdaterSnapshot {
+  /** Durable progress across host restarts. */
+  readonly operation?: UpdaterOperation | null
   readonly phase: UpdaterPhase
   readonly repoPath: string
   readonly branch: string
@@ -206,4 +210,19 @@ declare module '@deepseek-ai/cordis' {
      */
     'updater/state'(snapshot: UpdaterSnapshot): void
   }
+}
+
+/** One durable update transaction, including independently recorded checks. */
+export interface UpdaterOperation {
+  readonly version: 1
+  id: string
+  targetSha: string
+  backupId: string | null
+  stage: 'merge' | 'drafts' | 'verify' | 'restart' | 'complete' | 'recovered' | 'failed'
+  appliedDraftRefs: string[]
+  applyingDraftRef: string | null
+  expectedPlugins: string[]
+  checks: { name: string; status: 'passed' | 'failed' | 'unavailable'; detail: string }[]
+  initiatorId: string | null
+  restartAuthorized: boolean
 }

@@ -106,15 +106,10 @@ describe('regression: Bug C — UI swallows outcomes', () => {
 
 // ── Bug D: pnpm run build is broken ──
 describe('regression: Bug D — buildCommand pin', () => {
-  it('config default must not be pnpm run build', async () => {
-    const src = await import('node:fs').then(m => m.readFileSync('packages/host/updater/src/config.ts', 'utf8'))
-    expect(src).not.toMatch(/buildCommand:.*default\('pnpm run build'\)/)
-    expect(src).toContain('node scripts/rebuild-dsh-client.mjs')
-  })
-  it('normalizeConfig must migrate pnpm run build to the safe command', () => {
-    const cfg = resolveUpdaterConfig({ repoPath: 'C:\\tmp', buildCommand: 'pnpm run build' } as unknown)
-    expect(cfg.buildCommand).not.toBe('pnpm run build')
-    expect(cfg.buildCommand).toBe('node scripts/rebuild-dsh-client.mjs')
+  it('uses the standard build unless the deployment supplies another command', () => {
+    expect(resolveUpdaterConfig({}).buildCommand).toBe('pnpm run build')
+    expect(resolveUpdaterConfig({ buildCommand: 'node custom-build.mjs' }).buildCommand).toBe('node custom-build.mjs')
+    expect(resolveUpdaterConfig({ buildCommand: 'pnpm run build' }).buildCommand).toBe('pnpm run build')
   })
   it('autoApply must be clamped to false', () => {
     const cfg = resolveUpdaterConfig({ repoPath: 'C:\\tmp', autoApply: true } as unknown)
@@ -138,13 +133,10 @@ describe('regression: Bug E — test harness', () => {
 
 // ── Bug F: stash leak after resolve ──
 describe('regression: Bug F — stash leak', () => {
-  it('resolveConflict and writeMerged must drop stashes on finalization', async () => {
+  it('uses the common recovery finalizer for both conflict repair operations', async () => {
     const src = await import('node:fs').then(m => m.readFileSync('packages/host/updater/src/index.ts', 'utf8'))
-    // Both finalization paths should call dropApplyStashes
-    const matches = src.match(/dropApplyStashes/g) ?? []
-    expect(matches.length).toBeGreaterThanOrEqual(3) // restore + resolve + writeMerged
-    expect(src).toContain('Hardening: drop the stash')
-    expect(src).toContain('Hardening: same stash cleanup')
+    expect(src.slice(src.indexOf('async resolveConflict'), src.indexOf('private static validRelPath'))).toContain('this.finishUpdate()')
+    expect(src.slice(src.indexOf('async writeMerged'))).toContain('this.finishUpdate()')
   })
   it('engine must heal stale stashRefs on boot', async () => {
     const src = await import('node:fs').then(m => m.readFileSync('packages/host/updater/src/engine.ts', 'utf8'))
@@ -155,11 +147,15 @@ describe('regression: Bug F — stash leak', () => {
 
 // ── Guard: remote URL & ahead>0 block ──
 describe('regression: guard — remote URL and ahead>0', () => {
-  it('index.ts must contain remoteGuard and ahead block', async () => {
+  it('index.ts must contain remoteGuard and the fork-merge strategy', async () => {
     const src = await import('node:fs').then(m => m.readFileSync('packages/host/updater/src/index.ts', 'utf8'))
     expect(src).toContain('remoteGuard')
-    expect(src).toContain('Local commits exist')
     expect(src).toContain('expectedRemoteUrl')
+    // FORK UPDATE (2026-09-01): ahead > 0 must NOT block — the apply runs a
+    // real three-way merge instead. The old "Local commits exist" refusal
+    // made the updater permanently useless for the fork it ships in.
+    expect(src).not.toContain('Local commits exist')
+    expect(src).toMatch(/merge', '--no-edit', upstreamRef/)
   })
   it('computePlan must carry blocked through to the snapshot', () => {
     const plan = computePlan({
@@ -172,9 +168,9 @@ describe('regression: guard — remote URL and ahead>0', () => {
       untrackedPaths: [],
       commits: [],
       commitsTruncated: false,
-      blocked: 'Local commits exist (1 ahead)',
+      blocked: 'Remote URL changed (1 mismatch)',
     })
-    expect(plan.blocked).toBe('Local commits exist (1 ahead)')
+    expect(plan.blocked).toBe('Remote URL changed (1 mismatch)')
   })
 })
 

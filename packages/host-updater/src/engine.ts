@@ -17,18 +17,19 @@ import type {
   UpdaterResult, UpdaterSnapshot,
 } from './types.ts'
 import { stateDirOf } from './config.ts'
+import { readOperation } from './workflow.ts'
 
 /** Wire config projection. */
 export function configView(config: UpdaterConfig): UpdaterConfigView {
   const {
     repoPath, remoteName, branch, expectedRemoteUrl, pollIntervalMs, autoCheck, autoApply,
     requireConsentApply, requireConsentRestart, strategy, backups, backupsKeep, installDeps,
-    buildEnabled, buildCommand, launchCommand, maxRestartAttempts,
+    buildEnabled, buildCommand, verifyCommand, postRestartCommand, launchCommand, maxRestartAttempts,
   } = config
   return {
     repoPath, remoteName, branch, expectedRemoteUrl, pollIntervalMs, autoCheck, autoApply,
     requireConsentApply, requireConsentRestart, strategy, backups, backupsKeep, installDeps,
-    buildEnabled, buildCommand, launchCommand, maxRestartAttempts,
+    buildEnabled, buildCommand, verifyCommand, postRestartCommand, launchCommand, maxRestartAttempts,
   }
 }
 
@@ -162,7 +163,10 @@ export function initialEngineState(config: UpdaterConfig): EngineState {
       state.restartDead = boolean(raw.restartDead)
       // Auto-heal stale restart-pending/update-available when the persisted counters show we're actually up to date.
       // This handles upgrades from older state.json that never stored behind/currentSha.
-      if ((state.phase === 'restart-pending' || state.phase === 'update-available') && state.behind === 0 && state.ahead === 0 && state.upstreamSha !== null && state.currentSha !== null && state.upstreamSha === state.currentSha) {
+      // FORK UPDATE (2026-09-01): ahead > 0 is normal for the maintained fork —
+      // behind === 0 already means every upstream commit is present, so a stale
+      // update-available/restart-pending must heal even when the fork is ahead.
+      if ((state.phase === 'restart-pending' || state.phase === 'update-available') && state.behind === 0 && state.upstreamSha !== null && state.currentSha !== null && state.upstreamSha === state.currentSha) {
         state.phase = 'idle'
         state.pendingRestart = false
         state.plan = null
@@ -221,8 +225,13 @@ export function persistState(state: EngineState, config: UpdaterConfig): void {
 
 /** Build the full wire snapshot. */
 export function readSnapshot(state: EngineState, config: UpdaterConfig, backups: UpdaterBackupInfo[]): UpdaterSnapshot {
+  const operation = readOperation(config.repoPath)
+  const verified = operation?.stage === 'complete'
+    && operation.checks.some(check => check.name === 'post-restart' && check.status === 'passed')
+  const restartFailed = operation?.checks.some(check => check.name === 'post-restart' && check.status === 'failed') === true
   return {
-    phase: state.phase,
+    phase: verified && state.phase === 'restart-pending' ? 'applied' : state.phase,
+    operation,
     repoPath: config.repoPath,
     remoteName: config.remoteName,
     branch: config.branch,
@@ -241,8 +250,8 @@ export function readSnapshot(state: EngineState, config: UpdaterConfig, backups:
     lastCheckAt: state.lastCheckAt,
     lastApplyAt: state.lastApplyAt,
     lastInstallLine: state.lastInstallLine,
-    lastResult: state.lastResult,
-    error: state.error,
+    lastResult: verified ? { ok: true, at: state.lastApplyAt ?? operation.id, message: 'Updated application passed post-restart verification.' } : state.lastResult,
+    error: restartFailed ? 'Post-restart verification failed; recovery data has been retained.' : state.error,
     conflictedFiles: state.conflictedFiles,
     parkedDrafts: state.parkedDrafts,
     remoteUrl: state.remoteUrl,
@@ -255,11 +264,11 @@ export function readSnapshot(state: EngineState, config: UpdaterConfig, backups:
     gitAvailable: state.gitAvailable,
     gitVersion: state.gitVersion,
     restart: {
-      pending: state.pendingRestart,
+      pending: state.pendingRestart && !verified,
       authorized: false,
       supervised: false,
       lastRestartAt: state.restartLast,
-      dead: state.restartDead,
+      dead: restartFailed || state.restartDead,
     },
     config: configView(config),
   }

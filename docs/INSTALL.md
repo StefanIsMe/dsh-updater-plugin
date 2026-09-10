@@ -1,102 +1,43 @@
-# Installation Guide
+# Installation
 
-Get DeepSeek Harness Updater running in your DeepSeek Harness deployment in under 5 minutes. This guide works on any machine — Windows, macOS, or Linux — with no personal data required. Just replace example paths like `C:\Users\you\Projects\my-app` with your own checkout.
+Use a supported DSH source checkout with the Node and pnpm versions declared by that checkout's `package.json`. For the verified DSH 0.1.5-alpha.2 integration, Node is `^22.19.0 || >=24.0.0` and pnpm is `11.7.0`. Read the checkout's own instructions before editing it. Electron Desktop manages its executable packages separately and is outside this plugin's scope.
 
-## Prerequisites
+## Source mapping
 
-- **DeepSeek Harness** checkout — [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)
-- **Node.js ≥18**, **pnpm**, **git**
-- A running DSH instance (default `http://127.0.0.1:3080`)
+Clone this repository into a separate working directory. Integrate only these packages, preserving existing local modifications:
 
-## Install
+| Plugin source | DSH checkout destination |
+| --- | --- |
+| `packages/host-updater` | `packages/host/updater` |
+| `packages/client-ui-updater` | `packages/client/ui-updater` |
 
-### 1. Clone this plugin
+These packages use `workspace:^` dependencies and DSH-relative TypeScript configuration. Do not run `pnpm add file:...` against the detached source kit and expect it to resolve the harness workspace. Do not copy `node_modules`, generated `lib`, credentials or user data between installations.
 
-```bash
-git clone https://github.com/StefanIsMe/dsh-updater-plugin.git
-cd dsh-updater-plugin
+## Wire the active profile
+
+Inspect the current DSH architecture and existing integrations. Register the host updater, client updater and updater tools once each. On the tested source layout, the browser bundle is `packages/bundle/web-app`; its manifest must declare the host/client packages, and its patch must mount them. The model preset mounts `@deepseek-ai/dsh-host-updater/tools`. Preserve existing rows and use the patch syntax supported by the installed DSH version.
+
+The host manifest name is `@deepseek-ai/dsh-host-updater`; the client name is `@deepseek-ai/dsh-client-ui-updater`. The API Remote assembly imports the host's `/typert` and `/remote` exports and forwards `updater/state`. Add missing dependency declarations, TypeScript references and path mappings where required. Inspect existing Remote contributions as the version-specific pattern. Avoid creating a second updater service or duplicating a Remote namespace.
+
+## Configure for this installation
+
+Configure `repoPath`, `remoteName`, `branch` and `expectedRemoteUrl` from the actual checkout. Configure `buildCommand` for its supported build process; its default is `pnpm run build`. A custom repair script is a deployment choice, not a portable prerequisite. Ordered `&&` build steps and quoted arguments are supported without a shell.
+
+Set `verifyCommand` to meaningful pre-restart checks, including the pinned upstream commit, remaining conflicts, installed plugin inventory and build artifacts. Set `postRestartCommand` to a single executable command with arguments that returns zero only after authenticated application checks pass. Use an absolute executable path when necessary. It must check the correct configured endpoint/profile and fail on unauthorized responses or unavailable checks. Read credentials locally without embedding them in command arguments. Restart is refused until this command is configured.
+
+Set `launchCommand` to the exact supported DSH profile invocation as an array of executable plus arguments if the current invocation is wrapped by another supervisor. Ensure that only one supervisor owns the host. Preserve loader flags such as `--import tsx/esm` for source launches. The updater retains the current process flags when using its default relaunch command.
+
+## Build and verify
+
+From the integrated DSH checkout, install dependencies using its pnpm version. Compile the updater project, bundle its host/tools, generate its Remote artifacts, and build the client and web application. In the tested layout the key commands are:
+
+```text
+pnpm install --no-frozen-lockfile
+pnpm exec tsc -b packages/host/updater/tsconfig.json
+pnpm --dir packages/host/updater exec tsdown
+pnpm exec vitest run packages/host/updater/tests
 ```
 
-### 2. Add it to your harness checkout
+Remote generation and client compilation must follow the current DSH workspace build. If the checkout has a custom rebuild helper, confirm that it regenerates stale artifacts, rather than only missing files, and rebuilds the host updater as well as the client. A successful browser build alone is insufficient.
 
-**Option A — pnpm workspaces (recommended):**
-
-```bash
-# from your deepseek-harness directory
-pnpm add file:../dsh-updater-plugin/packages/host-updater
-pnpm add file:../dsh-updater-plugin/packages/client-ui-updater
-```
-
-**Option B — copy packages:**
-
-```bash
-cp -r packages/host-updater <your-harness>/packages/host/updater
-cp -r packages/client-ui-updater <your-harness>/packages/client/ui-updater
-```
-
-Or patch your bundle's `cordis.patch.yml` to reference the local packages.
-
-### 3. Register the host service
-
-Patch the Host row (example `cordis.patch.yml`):
-
-```yaml
-add:
-  updater:
-    package: "@deepseek-ai/dsh-host-updater"
-    config:
-      buildCommand: "pnpm run build:web"
-      expectedRemoteUrl: "https://github.com/<you>/<your-fork>.git"
-      autoApply: false
-```
-
-> `expectedRemoteUrl` is a safety guard — if set, the updater refuses to apply when the live git remote doesn't match.
-
-### 4. Register the Settings page
-
-Add `@deepseek-ai/dsh-client-ui-updater` to your web bundle dependencies and import its entry. It automatically registers the **Updater** section under **Settings**.
-
-### 5. Enable the AI assistant
-
-In `apps/cli/config/agent-presets/standard/agent.cordis.yml`:
-
-```yaml
-install:
-  - package: "@deepseek-ai/dsh-host-updater/tools"
-```
-
-This mounts the `updater_*` tools and the `/updater` command into every chat session using the `standard` preset.
-
-### 6. Build and launch
-
-```bash
-pnpm -C packages/host/updater run build
-pnpm -C packages/client/ui-updater run build
-pnpm run build:web
-# restart DSH
-```
-
-Open **Settings → Updater** — you should see the live status card and the **Update with AI** button.
-
-## Configuration
-
-All settings are stored per-deployment in `.dsh/updater/config.json` (gitignored) and survive restarts:
-
-```json
-{
-  "autoCheck": true,
-  "pollMs": 30000,
-  "buildCommand": "pnpm run build:web",
-  "expectedRemoteUrl": "https://github.com/<you>/<your-harness>.git",
-  "autoApply": false,
-  "strategy": "upstream-overlay"
-}
-```
-
-See the main [README](../README.md#️-configuration) for details on each field.
-
-## Tips
-
-- All example paths use `C:\Users\you\...` placeholders — never commit your real home directory.
-- Configuration lives in `.dsh/updater/` and is excluded by this plugin's `.gitignore`.
-- Need help? [Open an issue](https://github.com/StefanIsMe/dsh-updater-plugin/issues/new/choose) with the Bug report template.
+Boot through the actual `dsh` profile and verify its composed configuration. Exercise the updater tools against a disposable repository first; verify a real update, conflict repair, draft restoration and a second update. Then confirm that the live gateway exposes `start()` and `conflictContext()`, and that authenticated session and plugin operations work after restart. Preserve recovery copies until all required checks pass. Report precisely which platform and DSH revision were tested; do not promise compatibility with unknown future upstream changes.

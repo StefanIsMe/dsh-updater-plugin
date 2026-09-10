@@ -7,8 +7,8 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, copyFileSync, statSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, copyFileSync, statSync, lstatSync } from 'node:fs'
+import { join, dirname, delimiter } from 'node:path'
 import { runGit } from './git.ts'
 import type { UpdaterConfig } from './config.ts'
 import { stateDirOf } from './config.ts'
@@ -75,11 +75,28 @@ export async function createBackup(repo: string, config: UpdaterConfig, info: { 
     // from local.patch — restore then re-applied a partial patch, dropped the
     // stash on success, and the staged drafts were gone with a green report.
     // Diffing against HEAD captures the union (staged + unstaged).
-    const patch = await runGit(repo, ['diff', '--full-index', 'HEAD'], { timeoutMs: 60_000 })
+    const patch = await runGit(repo, ['diff', '--binary', '--full-index', 'HEAD'], { timeoutMs: 60_000 })
     if (patch.code === 0) {
       try { writeFileSync(join(dir, 'local.patch'), patch.stdout) } catch { /* best effort */ }
     }
   }
+  // Source and user data are recoverable even when a later version migrates them.
+  // Generated dependencies can be reinstalled; never follow workspace junctions.
+  const excluded = new Set(['node_modules', 'lib', 'dist', '.cache', 'venv', '__pycache__'])
+  const checkpoint = join(dir, 'checkpoint')
+  const snapshot = (rel: string): void => {
+    if (rel === '.dsh/updater' || rel.startsWith('.dsh/updater/')) return
+    if (rel.split('/').some(part => excluded.has(part))) return
+    const src = join(repo, rel), dst = join(checkpoint, rel)
+    const stat = lstatSync(src)
+    if (stat.isSymbolicLink()) return
+    if (stat.isDirectory()) {
+      mkdirSync(dst, { recursive: true })
+      for (const child of readdirSync(src)) snapshot(rel ? `${rel}/${child}` : child)
+    } else if (stat.isFile()) copyFileSync(src, dst)
+  }
+  snapshot('')
+  writeFileSync(join(dir, 'checkpoint-complete'), '1\n')
   // Belt-and-braces snapshot of the untracked-risk files (tiny by design).
   for (const rel of info.untrackedRisk) {
     const src = join(repo, ...rel.split('/'))
@@ -101,7 +118,10 @@ function pruneBackups(repo: string, config: UpdaterConfig): void {
   if (!existsSync(dir)) return
   const keep = Math.max(1, config.backupsKeep)
   const dirs = readdirSync(dir).filter(n => /^\d{4}-\d{2}/.test(n)).sort().reverse()
+  const activeFile = join(stateDirOf(repo), 'operation.json')
+  const active = existsSync(activeFile) ? JSON.parse(readFileSync(activeFile, 'utf8')) as { backupId?: string } : null
   for (const stale of dirs.slice(keep)) {
+    if (stale === active?.backupId) continue
     try { rmSync(join(dir, stale), { recursive: true, force: true }) } catch { /* best effort */ }
   }
 }
@@ -151,6 +171,14 @@ export async function pushDraftStashes(
     }
   }
   if (trackedPaths.length > 0) {
+    // Git 2.55 rejects a pathspec naming a staged deletion. The full checkpoint
+    // preserves the index while this normalization keeps the deletion intact.
+    const deleted = await runGit(repo, ['diff', '--cached', '--name-only', '--diff-filter=D', '-z', '--', ...trackedPaths])
+    const deletedPaths = deleted.stdout.split('\0').filter(Boolean)
+    if (deletedPaths.length) {
+      const reset = await runGit(repo, ['reset', 'HEAD', '--', ...deletedPaths])
+      if (reset.code !== 0) throw new Error('Could not prepare saved deletions.')
+    }
     const r = await runGit(repo, ['stash', 'push', '-m', `updater:${tag}`, '--', ...trackedPaths], { timeoutMs: 60_000 })
     if (r.code === 0) {
       created.push(1)
@@ -187,6 +215,9 @@ export async function writeParkedDraft(
 /**
  * Pop `n` stashes from the top of the stack (newest first). A conflict aborts
  * the loop and reports it — the stash is left intact for manual resolution.
+ * `popped` counts stashes actually consumed (clean pops + overlay-resolved
+ * drops) so callers can maintain `state.stashCount` without a stash-stack
+ * baseline: remaining = previous count − popped.
  *
  * In `overlay` mode (the upstream-overlay strategy) a pop conflict is resolved
  * automatically: the local draft is parked under `.dsh/updater/drafts/` (never
@@ -202,12 +233,16 @@ export async function unstashN(
     backupId?: string
     onParked?: (path: string, parkedFile: string, stashRef: string | null) => void
   } = {},
-): Promise<{ conflicts: string[]; parked: string[] }> {
+): Promise<{ conflicts: string[]; parked: string[]; popped: number }> {
   const conflicts: string[] = []
   const parked: string[] = []
+  let popped = 0
   for (let i = 0; i < n; i += 1) {
     const r = await runGit(repo, ['stash', 'pop'], { timeoutMs: 60_000 })
-    if (r.code === 0) continue
+    if (r.code === 0) {
+      popped += 1
+      continue
+    }
     // A conflict leaves the stash on the stack. Tracked-file conflicts surface
     // as unmerged markers; an untracked-stash pop that fails because upstream
     // now owns the path leaves NO markers — enumerate the stash's own paths
@@ -238,13 +273,14 @@ export async function unstashN(
           await runGit(repo, ['add', '--', f], { timeoutMs: 30_000 })
         }
         await runGit(repo, ['stash', 'drop'], { timeoutMs: 30_000 })
+        popped += 1 // the handled stash left the stack
       }
       continue
     }
     for (const f of files) if (!conflicts.includes(f)) conflicts.push(f)
     break
   }
-  return { conflicts, parked }
+  return { conflicts, parked, popped }
 }
 
 /** Paths with unmerged markers right now (`git diff --diff-filter=U`). */
@@ -347,13 +383,14 @@ export async function runLongCommand(
 ): Promise<{ ok: boolean; code: number | null; timedOut: boolean }> {
   const timeoutMs = options.timeoutMs ?? 60 * 60 * 1000
   const maxBytes = options.maxBytes ?? 4 * 1024 * 1024
-  const program = argv[0]
+  const actual = argv[0] === 'pnpm' ? [...pnpmPrefix(), ...argv.slice(1)] : [...argv]
+  const program = actual[0]
   if (program === undefined) {
     onLine('[spawn] failed: command is empty')
     return { ok: false, code: null, timedOut: false }
   }
   return new Promise((resolve) => {
-    const child = spawn(program, [...argv.slice(1)], {
+    const child = spawn(program, actual.slice(1), {
       cwd: repo,
       detached: false,
       stdio: 'pipe',
@@ -379,7 +416,7 @@ export async function runLongCommand(
     child.on('close', (code) => {
       clearTimeout(timer)
       if (timedOut) onLine(`[timed out after ${timeoutMs} ms]`)
-      resolve({ ok: code === 0, code, timedOut })
+      resolve({ ok: code === 0 && !timedOut, code, timedOut })
     })
   })
 }
@@ -409,4 +446,24 @@ export function parseCommandLine(command: string): string[] {
   }
   if (started) tokens.push(current)
   return tokens
+}
+
+/** Resolve pnpm's executable without asking a shell to reinterpret arguments. */
+export function pnpmPrefix(): string[] {
+  const entry = process.env.npm_execpath
+  if (entry && /pnpm(?:\.c?js|\.exe)$/.test(entry) && existsSync(entry)) {
+    return entry.endsWith('.exe') ? [entry] : [process.execPath, entry]
+  }
+  if (process.platform !== 'win32') return ['pnpm']
+  for (const dir of (process.env.PATH ?? '').split(delimiter)) {
+    const exe = join(dir, 'pnpm.exe')
+    if (existsSync(exe)) return [exe]
+    const shim = join(dir, 'pnpm.ps1')
+    if (!existsSync(shim)) continue
+    const match = readFileSync(shim, 'utf8').match(/"([A-Za-z]:[^"\r\n]*pnpm\.exe)"/)
+    if (match?.[1] && existsSync(match[1])) return [match[1]]
+    const js = join(dir, 'node_modules/pnpm/bin/pnpm.cjs')
+    if (existsSync(js)) return [process.execPath, js]
+  }
+  throw new Error('The installed pnpm executable could not be found.')
 }

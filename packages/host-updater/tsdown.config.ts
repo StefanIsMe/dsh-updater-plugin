@@ -9,7 +9,7 @@ import { defineConfig } from 'tsdown'
  * scripts/typert-repair.mjs when missing.
  */
 export default defineConfig({
-  entry: ['lib/types/{index,invariant,tools}.js'],
+  entry: ['lib/types/index.js', 'lib/types/invariant.js', 'lib/types/tools.js'],
   outDir: 'lib',
   format: ['esm'],
   platform: 'node',

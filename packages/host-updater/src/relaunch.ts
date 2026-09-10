@@ -16,6 +16,7 @@ import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { UpdaterConfig } from './config.ts'
+import { parseCommandLine } from './pipeline.ts'
 
 /** The child must survive this long before the supervisor treats it as healthy. */
 export const CLEAR_AFTER_MS = 20_000
@@ -32,7 +33,7 @@ export function supervisorSourcePath(): string {
  */
 export function buildLaunchCommand(config: UpdaterConfig): string[] {
   if (config.launchCommand !== null && config.launchCommand.length > 0) return [...config.launchCommand]
-  return [process.execPath, ...process.argv.slice(1)]
+  return [process.execPath, ...process.execArgv, ...process.argv.slice(1)]
 }
 
 /**
@@ -41,6 +42,7 @@ export function buildLaunchCommand(config: UpdaterConfig): string[] {
  * clears once the new child is healthy.
  */
 export function armSupervisor(config: UpdaterConfig): { ok: boolean; message: string } {
+  if (!config.postRestartCommand.trim()) return { ok: false, message: 'Configure an authenticated postRestartCommand before restarting. The update and recovery data are retained.' }
   const { repoPath } = config
   const stateDir = join(repoPath, '.dsh', 'updater')
   mkdirSync(stateDir, { recursive: true })
@@ -58,8 +60,8 @@ export function armSupervisor(config: UpdaterConfig): { ok: boolean; message: st
     maxAttempts: Math.max(1, config.maxRestartAttempts),
     // Post-restart UI gate: the supervisor only clears the arm when the web UI
     // actually serves the module table with the updater client row present.
-    verifyUrl: 'http://127.0.0.1:3080/',
-    verifyMarker: 'dsh-client-ui-updater',
+    verifyCommand: parseCommandLine(config.postRestartCommand),
+    parentPid: process.pid,
   }
   try {
     writeFileSync(join(stateDir, 'arm.json'), `${JSON.stringify({ pid: process.pid, at: new Date().toISOString() }, null, 2)}\n`)

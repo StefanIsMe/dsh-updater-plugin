@@ -5,8 +5,9 @@
  *
  *   - `updater_status` — current snapshot (compact JSON).
  *   - `updater_check` — fetch upstream + recompute the plan.
- *   - `updater_apply` — run the safe apply pipeline (fire-and-forget; poll
- *     `updater_status` until the phase settles).
+ *   - `updater_apply` — run the safe apply pipeline (fork-merge aware:
+ *     fast-forward when clean, three-way merge when the fork is ahead;
+ *     fire-and-forget — poll `updater_status` until the phase settles).
  *   - `updater_file_diff` — unified diff of one path (HEAD vs upstream).
  *   - `updater_local_draft` — the stashed local draft of one conflicted path
  *     (the local side of an AI-authored merge).
@@ -22,7 +23,7 @@
  *
  * Every tool is a thin adapter over the `updater` gateway's public methods;
  * the gateway stays the sole executor and safety net (backup → stash-only
- * collisions → ff-only merge → draft restore → conflicts/restore).
+ * collisions → ff-only/fork-merge → draft restore → conflicts/restore).
  *
  * @module @deepseek-ai/dsh-host-updater/tools
  */
@@ -50,6 +51,7 @@ function compactStatus(snapshot: UpdaterSnapshot): string {
   const plan = snapshot.plan
   const backups = snapshot.backups.slice(0, 5).map(b => ({ id: b.id, createdAt: b.createdAt }))
   return JSON.stringify({
+    operation: snapshot.operation,
     phase: snapshot.phase,
     repoPath: snapshot.repoPath,
     currentVersion: snapshot.currentVersion,
@@ -102,23 +104,34 @@ export function apply(ctx: Context): void {
   ctx.systemPrompt.section({
     name: 'tool:updater',
     order: 115,
-    text: 'Use updater_status to read the self-update state, updater_check to fetch and plan, '
-      + 'and updater_apply to run the update. When local drafts conflict with upstream changes, '
-      + 'read the local side with updater_local_draft, compare it with the working tree / '
-      + 'updater_file_diff, and resolve per file with updater_resolve_conflict (keep-local, '
-      + 'take-upstream, keep-both) or write an authored merge with updater_write_merged. '
-      + 'Never drop a local draft silently — park it or ask the user. Restore with '
-      + 'updater_restore when something goes wrong; restart with updater_restart when the phase '
-      + 'is restart-pending. Confirm destructive steps with the user when uncertain. '
-      + 'MANDATORY POST-UPDATE AUDIT (2026-08-22, after rc.2 silently dropped wiring): before declaring success or calling updater_restart you MUST: '
-      + '(0) setConfig autoCheck:false before apply and re-enable after; '
-      + '(1) git grep -n -E "^(<{7}|={7}$|>{7})" over the ENTIRE repo including root tsconfigs and resolve markers; '
-      + '(2) verify packages/bundle/web-app/cordis.patch.yml still has updater+ui-updater rows; '
-      + '(3) verify api/remotes lists updater/state and mounts updaterRemote; '
-      + '(4) pnpm install if needed then node scripts/rebuild-dsh-client.mjs -> 0; '
-      + '(5) vitest every touched package -> green; '
-      + '(6) report all steps then restart. Skipping a step is failure even if updater reports success.',
+    text: 'For a user-requested DSH update, use updater_start. This authorizes the complete backup, repair, verification and restart workflow. '
+      + 'Use updater_status for progress. For conflicts use updater_conflict_context, preserve local functionality, '
+      + 'write a compatible result with updater_write_merged, then resume with updater_start. '
+      + 'Handle routine technical decisions without asking the user. Never delete or disable local plugins to pass checks. '
+      + 'The gateway owns verification; do not claim success until the operation is complete. Explain outcomes in plain language.',
   })
+
+  ctx.tools.register(defineTool({
+    name: 'updater_start',
+    description: 'Start or resume the user-requested DSH update, including backup, repairs, checks and restart. Poll updater_status for progress.',
+    parameters: {}, output: TEXT_OUTPUT,
+    async execute() {
+      if (typeof updater.start !== 'function') return JSON.stringify({ ok: false, message: 'Updater tools and host versions differ. Rebuild the host updater, generated Remote artifacts and client together, verify them, then restart the DSH profile. Preserve the existing recovery records; retrying this tool cannot reload the host.' })
+      return JSON.stringify(await updater.start())
+    },
+    presentCall: () => present('Update DSH'),
+  }))
+  ctx.tools.register(defineTool({
+    name: 'updater_conflict_context',
+    description: 'Read separate base, local, incoming and saved-draft versions of a conflicted file before preserving both sets of behavior.',
+    parameters: { path: { type: 'string', required: true, description: 'Conflicted repository-relative file.' } },
+    output: TEXT_OUTPUT,
+    async execute(args: { path: string }) {
+      if (typeof updater.conflictContext !== 'function') return JSON.stringify({ ok: false, message: 'Updater host is older than its tools. Rebuild matching updater artifacts and restart the profile before resuming repairs.' })
+      return JSON.stringify(await updater.conflictContext(args.path))
+    },
+    presentCall: args => present('Prepare compatibility repair', args.path),
+  }))
 
   ctx.tools.register(defineTool({
     name: 'updater_status',
@@ -149,9 +162,12 @@ export function apply(ctx: Context): void {
   ctx.tools.register(defineTool({
     name: 'updater_apply',
     description: 'Start the safe apply pipeline: safety backup, stash only the colliding local '
-      + 'drafts, fast-forward to upstream, re-apply the drafts, then install/build/restart '
-      + 'classification. Fire-and-forget: poll updater_status until inProgress is false and the '
-      + 'phase settles (update-available, conflicts, applied, restart-pending, or error).',
+      + 'drafts, then merge upstream. On a clean checkout this is a fast-forward; on the '
+      + 'maintained fork (local commits ahead) it is a real three-way merge that KEEPS all '
+      + 'fork commits — conflicts surface in the conflicts phase and resolve via '
+      + 'updater_resolve_conflict / updater_write_merged. Fire-and-forget: poll updater_status '
+      + 'until inProgress is false and the phase settles (update-available, conflicts, '
+      + 'applied, restart-pending, or error).',
     parameters: {},
     output: TEXT_OUTPUT,
     async execute() {

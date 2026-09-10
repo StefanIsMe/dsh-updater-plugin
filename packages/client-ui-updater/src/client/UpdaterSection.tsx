@@ -246,7 +246,7 @@ function CheckingHero({ t }: { t: (key: UpdaterKey) => string }) {
  * @param props - composed slot props (contract/slots.ts).
  * @returns the updater page element tree.
  */
-export function UpdaterSection({ t, updater }: UpdaterSectionProps) {
+export function UpdaterSection({ t, updater, close }: UpdaterSectionProps) {
   const snapshot = useSyncExternalStore(updater.subscribe, updater.getSnapshot)
   const [launchError, setLaunchError] = useState<string | null>(null)
   const launchErrorTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -260,19 +260,25 @@ export function UpdaterSection({ t, updater }: UpdaterSectionProps) {
   }
 
   const { config, plan, error } = snapshot
-  // Defensive auto-heal: if the host still reports restart-pending/update-available but git is actually 0 behind/ahead and SHAs match, show idle. This covers old persisted state.json that predates the host boot-reconcile.
-  const effectivePhase: UpdaterPhase = (snapshot.phase === 'restart-pending' || snapshot.phase === 'update-available') && snapshot.behind === 0 && snapshot.ahead === 0 && snapshot.upstreamSha !== null && snapshot.currentSha !== null && snapshot.upstreamSha === snapshot.currentSha ? 'idle' : snapshot.phase
+  // Defensive auto-heal: if the host still reports restart-pending/update-available but git is actually 0 behind and SHAs match, show idle. This covers old persisted state.json that predates the host boot-reconcile.
+  // FORK UPDATE (2026-09-01): the ahead === 0 condition was dropped — ahead > 0
+  // is normal for the maintained fork, and behind === 0 + matching SHAs is the
+  // real "up to date" test. With ahead in the test, the fork (8 commits ahead)
+  // showed a phantom "Update with AI" card with versions 0.1.2-alpha.3 → itself.
+  const effectivePhase: UpdaterPhase = (snapshot.phase === 'restart-pending' || snapshot.phase === 'update-available') && snapshot.behind === 0 && snapshot.upstreamSha !== null && snapshot.currentSha !== null && snapshot.upstreamSha === snapshot.currentSha ? 'idle' : snapshot.phase
   const phase = effectivePhase
   const busy = snapshot.inProgress
 
-  /** Open the AI session prefilled with the updater command.
+  /** Open the AI session prefilled with the updater command, then close settings.
    * The session agent drives the whole update via updater_* tools (the only
    * supported path after 2026-08-19; no manual Apply button exists).
+   * Settings stays open on launch failure so the inline error remains visible.
    */
   const launch = async (command?: string): Promise<void> => {
     try {
       setLaunchError(null)
       await updater.launchUpdate(command)
+      close()
     } catch (launchFailure: unknown) {
       setLaunchError(launchFailure instanceof Error ? launchFailure.message : String(launchFailure))
       if (launchErrorTimer.current !== undefined) clearTimeout(launchErrorTimer.current)
@@ -379,7 +385,7 @@ export function UpdaterSection({ t, updater }: UpdaterSectionProps) {
               </div>
             )}
             <ul className={css.commitList}>
-              {plan.incomingCommits.slice(0, 6).map((commit) => (
+              {plan.incomingCommits.slice(0, 6).map(commit => (
                 <li key={commit.sha}>
                   <code>{commit.sha.slice(0, 8)}</code> <span>{commit.subject}</span>
                 </li>
@@ -410,7 +416,7 @@ function BackupsCard({ t, backups, onChat }: {
       <h3>{t('backups.title')}</h3>
       {backups.length === 0 && <p className={css.muted}>{t('backups.empty')}</p>}
       <ul className={css.backupList}>
-        {backups.slice(0, 5).map((backup) => (
+        {backups.slice(0, 5).map(backup => (
           <li key={backup.id} className={css.backupRow}>
             <span>{formatTime(backup.createdAt)}</span>
             <Button size="sm" variant="outline" icon={<IconNewChatOutline16 size={14} />} onClick={() => onChat(backup.id)}>
@@ -443,7 +449,7 @@ function ConfigCard({ t, updater, config }: {
       <h3>{t('config.title')}</h3>
       <div className={css.form}>
         <label className={css.row}>
-          <input type="checkbox" checked={Boolean(value.autoCheck)} onChange={(e) => bump('autoCheck', e.target.checked)} />
+          <input type="checkbox" checked={Boolean(value.autoCheck)} onChange={e => bump('autoCheck', e.target.checked)} />
           <span>{t('config.autoCheck')}</span>
         </label>
         <label className={css.field}>
@@ -453,12 +459,12 @@ function ConfigCard({ t, updater, config }: {
             min={15}
             max={3600}
             value={Number(value.pollIntervalMs) / 1000}
-            onChange={(e) => bump('pollIntervalMs', Math.max(15, Number(e.target.value) * 1000))}
+            onChange={e => bump('pollIntervalMs', Math.max(15, Number(e.target.value) * 1000))}
           />
         </label>
         <label className={css.field}>
           <span>{t('config.build')}</span>
-          <input type="text" value={String(value.buildCommand ?? '')} onChange={(e) => bump('buildCommand', e.target.value)} />
+          <input type="text" value={String(value.buildCommand ?? '')} onChange={e => bump('buildCommand', e.target.value)} />
         </label>
         <div className={css.formActions}>
           <Button variant="ghost" disabled={draft === null} onClick={() => {

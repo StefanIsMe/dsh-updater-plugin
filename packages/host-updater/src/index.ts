@@ -40,6 +40,9 @@ import {
   pushDraftStashes, readBackupMeta, restoreUntrackedSnapshot, runLongCommand, scanWorkingTree,
   unmergedPaths, unstashN, writeParkedDraft,
 } from './pipeline.ts'
+import { readOperation, saveOperation, commandSteps } from './workflow.ts'
+import type {} from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/cordis-plugin-loader'
 import { armSupervisor } from './relaunch.ts'
 import type { UpdaterAction, UpdaterConfigView, UpdaterParkedDraft } from './types.ts'
 
@@ -96,6 +99,8 @@ export class UpdaterGateway extends TypertRemoteService {
   private readonly checking = { value: false }
   private readonly applying = { value: false }
   private disposed = false
+  private authorizedRun = false
+  private initiatorId: string | null = null
 
   /** @param ctx - Host context. @param rowConfig - validated row configuration. */
   constructor(ctx: Context, rowConfig: UpdaterConfig) {
@@ -103,7 +108,9 @@ export class UpdaterGateway extends TypertRemoteService {
     const repoPath = typeof rowConfig?.repoPath === 'string' && rowConfig.repoPath.length > 0
       ? rowConfig.repoPath
       : process.cwd()
-    this.config = loadUpdaterConfig(repoPath)
+    this.config = existsSync(join(stateDirOf(repoPath), 'config.json'))
+      ? loadUpdaterConfig(repoPath)
+      : resolveUpdaterConfig({ ...rowConfig, repoPath })
     this.state = initialEngineState(this.config)
     this.state.currentVersion = readLocalVersion(repoPath)
     this.state.gitAvailable = false
@@ -155,7 +162,7 @@ export class UpdaterGateway extends TypertRemoteService {
     if (this.state.phase !== 'error' && this.state.phase !== 'conflicts') return
     if (!this.state.gitAvailable) return
     const unmerged = await unmergedPaths(this.config.repoPath)
-    if (unmerged.length > 0) this.state.conflictedFiles = unmerged
+    this.state.conflictedFiles = unmerged
   }
 
   /** Persist + emit a fresh snapshot. */
@@ -295,7 +302,14 @@ export class UpdaterGateway extends TypertRemoteService {
       this.state.lastCheckAt = new Date().toISOString()
       this.state.error = null
 
-      const upToDate = upstreamSha !== null && upstreamSha === head && behindCount === 0
+      const upToDate = upstreamSha !== null && behindCount === 0
+      this.state.conflictedFiles = await unmergedPaths(repoPath)
+      const activeOperation = readOperation(repoPath)
+      if (upToDate && activeOperation && !['complete', 'recovered'].includes(activeOperation.stage)) {
+        if (this.state.conflictedFiles.length) this.setPhase('conflicts')
+        else if (activeOperation.stage === 'restart') this.setPhase('restart-pending')
+        return { ok: false, message: 'The pinned update is present; its recovery or verification still needs to finish.' }
+      }
       if (upToDate) {
         this.state.plan = null
         this.state.progress = null
@@ -315,9 +329,20 @@ export class UpdaterGateway extends TypertRemoteService {
           this.log(`check: up to date but ${unmerged.length} conflicted draft(s) await resolution`)
           return { ok: false, message: `Up to date, but ${unmerged.length} conflicted draft(s) still need resolution.` }
         }
-        this.log('check: up to date')
+        // FORK UPDATE (2026-09-01): ahead > 0 is normal for the maintained
+        // fork (paperclip File*, updater bundle, toolchain). ahead alone is
+        // NOT "up to date" — that was the root cause of the phantom
+        // "Update DSH with AI / 0.1.2-alpha.3 → 0.1.2-alpha.3" card: behind
+        // was 0 but ahead was 8, so the old `upstreamSha === head` test
+        // failed and the check fell through to `update-available` with an
+        // empty 0-commit plan. behind === 0 means the working tree contains
+        // every upstream commit; show the up-to-date state and let the UI
+        // surface the ahead count in the status card.
+        this.log(`check: up to date (behind 0, ahead ${aheadCount} fork commit(s) kept)`)
         this.setPhase('idle')
-        return { ok: true, message: 'Up to date.' }
+        return { ok: true, message: aheadCount > 0
+          ? `Up to date — ${aheadCount} local fork commit(s) ahead, nothing new upstream.`
+          : 'Up to date.' }
       }
       if (upstreamSha === null) {
         this.state.error = 'Upstream branch not found; is the remote configured?'
@@ -326,10 +351,13 @@ export class UpdaterGateway extends TypertRemoteService {
       }
 
       // Reasons the update cannot be applied (never auto-apply through these).
-      let blocked: string | null = aheadCount > 0
-        ? `Local commits exist (${aheadCount} ahead of upstream). The updater never rewrites history — merge or reset locally before applying.`
-        : null
-      if (blocked === null) blocked = this.remoteGuard(remoteUrl)
+      //
+      // FORK UPDATE (2026-09-01): ahead > 0 no longer blocks. This checkout is
+      // a maintained fork — local commits are the point, not an obstacle. The
+      // apply pipeline runs a real three-way merge (`git merge --no-edit`)
+      // when ahead > 0 and keeps the ff-only fast path for a clean checkout.
+      // Only a genuinely diverged/foreign remote stays blocked.
+      const blocked: string | null = this.remoteGuard(remoteUrl)
 
       // Build the plan on the FULL change set; only the wire display list is capped.
       const raw = await runGit(
@@ -415,7 +443,7 @@ export class UpdaterGateway extends TypertRemoteService {
     this.applying.value = true
     this.state.inProgress = true
     const { repoPath, remoteName, branch } = this.config
-    const upstreamRef = `${remoteName}/${branch}`
+    let upstreamRef = `${remoteName}/${branch}`
     const startedAt = new Date().toISOString()
     try {
       // 1 — ensure a fresh plan. The check runs under the applying lock we
@@ -428,11 +456,15 @@ export class UpdaterGateway extends TypertRemoteService {
         return { ok: false, message: 'Nothing to apply.' }
       }
       const plan = this.state.plan
+      // Fork merge needs the live ahead count (performCheck just refreshed it).
+      const ahead = this.state.ahead
       if (plan.blocked !== null) {
         this.state.error = plan.blocked
         this.setPhase('update-available')
         return { ok: false, message: plan.blocked }
       }
+      upstreamRef = this.state.upstreamSha ?? upstreamRef
+      saveOperation(repoPath, { version: 1, id: startedAt, targetSha: upstreamRef, backupId: null, stage: 'merge', appliedDraftRefs: [], applyingDraftRef: null, expectedPlugins: this.pluginNames(), checks: [], initiatorId: this.initiatorId, restartAuthorized: this.authorizedRun })
       this.bumpForApply()
       this.setPhase('applying')
 
@@ -455,6 +487,11 @@ export class UpdaterGateway extends TypertRemoteService {
         untrackedRisk: plan.untrackedRisk,
       })
       this.state.backupId = backupId
+      const operation = readOperation(repoPath)!
+      operation.backupId = backupId
+      saveOperation(repoPath, operation)
+      this.state.stashRefs = []
+      this.state.stashCount = 0
       this.pub()
 
       // 4 — stash only the drafts that would collide.
@@ -464,6 +501,7 @@ export class UpdaterGateway extends TypertRemoteService {
           const created = await pushDraftStashes(repoPath, plan.conflictRisk, plan.untrackedRisk, backupId.slice(0, 17))
           this.state.stashCount = created.created
           this.state.stashRefs = created.refs
+          this.pub()
           this.log(`apply: stashed ${created.created} draft(s)`)
         } catch (error) {
           this.state.stashCount = (await countStashes(repoPath)) - stashBefore
@@ -474,9 +512,47 @@ export class UpdaterGateway extends TypertRemoteService {
       }
 
       // 5 — fast-forward to upstream.
-      this.progress('merge', `Merging upstream ${upstreamRef}…`)
-      const mergeRes = await runGit(repoPath, ['merge', '--ff-only', upstreamRef], { timeoutMs: 120_000 })
+      //
+      // FORK-MERGE (2026-09-01): this checkout is a maintained fork (8 local
+      // commits: paperclip File*, updater bundle, toolchain). The old
+      // `--ff-only` merge hard-refused whenever ahead > 0, making the updater
+      // permanently useless for the fork it ships in. Strategy now:
+      //   ahead == 0 → `merge --ff-only` (fast path, zero risk);
+      //   ahead  > 0 → `git merge --no-edit <upstreamRef>` — a real three-way
+      //   merge that keeps every fork commit. Content collisions inside the
+      //   merge itself surface through MERGE_HEAD/unmerged paths (step 5b);
+      //   history is never rewritten, so the fork's commits stay intact and
+      //   any conflict is resolvable per-file.
+      this.progress('merge', ahead > 0
+        ? `Merging fork (ahead ${ahead}) with upstream ${upstreamRef}…`
+        : `Fast-forwarding to ${upstreamRef}…`)
+      const mergeArgv = ahead > 0
+        ? ['merge', '--no-edit', upstreamRef]
+        : ['merge', '--ff-only', upstreamRef]
+      const mergeRes = await runGit(repoPath, mergeArgv, { timeoutMs: 120_000 })
       if (mergeRes.code !== 0) {
+        // Fork-merge conflict: git left MERGE_HEAD + unmerged index entries.
+        // These resolve through the SAME escape hatches as stash-pop conflicts
+        // (resolveConflict / writeMerged / restore). Do NOT unwind the merge —
+        // parking the fork into a fake error state loses the merge state git
+        // is preserving for us. Handle stash drafts first (below), then
+        // surface the merge conflicts as the `conflicts` phase.
+        const mergeUnmerged = await unmergedPaths(repoPath)
+        if (ahead > 0 && mergeUnmerged.length > 0) {
+          this.state.conflictedFiles = mergeUnmerged
+          this.state.error = null
+          this.log(`apply: fork merge conflicted on ${mergeUnmerged.length} path(s) — resolve or restore`)
+          // Drafts remain untouched until the fork merge is committed.
+          // 5b — verification differs for a conflicted fork merge: HEAD has
+          // NOT moved yet (the merge is unfinished), so comparing HEAD to
+          // upstream would fail here. Skip to conflict resolution; the final
+          // verification happens in resolveConflict/writeMerged finalization.
+          this.progress('merge', `Fork merge needs conflict resolution (${this.state.conflictedFiles.length} file(s)).`)
+          this.setPhase('conflicts')
+          this.state.lastApplyAt = new Date().toISOString()
+          this.state.lastResult = { ok: false, at: this.state.lastApplyAt, message: 'Update merged with conflicts; resolve them to finish.' }
+          return { ok: false, message: 'Fork merge has conflicts; resolve them (chat) to finish the update.' }
+        }
         // Undo — pull the drafts back off the stack.
         if (this.state.stashCount > 0) await unstashN(repoPath, this.state.stashCount)
         this.state.stashCount = (await countStashes(repoPath)) - stashBefore
@@ -487,98 +563,24 @@ export class UpdaterGateway extends TypertRemoteService {
       }
       const headAfter = await resolveHead(repoPath)
       const upstreamSha = await runGit(repoPath, ['rev-parse', upstreamRef], { timeoutMs: 20_000 })
-      if (headAfter === null || upstreamSha.stdout.trim() !== headAfter) {
-        this.state.error = 'Merge did not reach the upstream commit; review the repository.'
+      // FORK-MERGE verification: after a three-way fork merge HEAD is a NEW
+      // merge commit (never equal to upstreamSha). The correct invariant is
+      // "upstream is now an ancestor of HEAD" — the ff-only path still gets
+      // the strict equality check. Use `git merge-base --is-ancestor` for the
+      // fork path; `--is-ancestor` also returns 0 for equal SHAs, so it is a
+      // superset test, but the fast path keeps its exact check for parity.
+      const verifyFork = ahead > 0
+        ? (await runGit(repoPath, ['merge-base', '--is-ancestor', upstreamRef, 'HEAD'], { timeoutMs: 20_000 })).code === 0
+        : false
+      if (headAfter === null || (ahead > 0 ? !verifyFork : upstreamSha.stdout.trim() !== headAfter)) {
+        this.state.error = ahead > 0
+          ? 'Fork merge did not include the upstream commit; review the repository.'
+          : 'Merge did not reach the upstream commit; review the repository.'
         this.setPhase('error')
         return { ok: false, message: this.state.error }
       }
 
-      // 6 — restore the drafts on top of upstream.
-      if (this.state.stashCount > 0) {
-        this.progress('restore-drafts', 'Re-applying local drafts…')
-        const overlay = this.config.strategy === 'upstream-overlay'
-        const { conflicts, parked } = await unstashN(repoPath, this.state.stashCount, {
-          overlay,
-          stateDir: stateDirOf(repoPath),
-          backupId,
-          onParked: (path, parkedFile, stashRef) => {
-            this.state.parkedDrafts = [...this.state.parkedDrafts, {
-              path, parkedAt: new Date().toISOString(), stashRef, parkedFile,
-            } satisfies UpdaterParkedDraft]
-          },
-        })
-        this.state.stashCount = Math.max(0, (await countStashes(repoPath)) - stashBefore)
-        const unmerged = await unmergedPaths(repoPath)
-        if (!overlay && (conflicts.length > 0 || unmerged.length > 0)) {
-          this.state.conflictedFiles = unmerged.length > 0 ? unmerged : conflicts
-          this.state.error = 'Some local drafts conflict with the update. Resolve them or restore the backup.'
-          this.log(`apply: stash pop conflicts: ${this.state.conflictedFiles.join(', ')}`)
-          this.setPhase('conflicts')
-          return { ok: false, message: 'Update merged; local drafts need conflict resolution.' }
-        }
-        if (parked.length > 0) {
-          this.log(`apply: parked ${parked.length} draft(s) under .dsh/updater/drafts (upstream-overlay)`)
-        }
-      }
-
-      // 7 — verify.
-      const verified = await resolveHead(repoPath)
-      if (verified === null || verified !== upstreamSha.stdout.trim()) {
-        this.state.error = 'Verification failed after merge.'
-        this.setPhase('error')
-        return { ok: false, message: 'Verification failed after merge.' }
-      }
-
-      // 8 — dependency install.
-      if (plan.needsInstall && this.config.installDeps) {
-        this.progress('install', 'Installing dependencies (pnpm install)…')
-        const install = await runLongCommand(repoPath, ['pnpm', 'install'], (line) => {
-          this.log(`install: ${line}`)
-          this.state.lastInstallLine = line.slice(0, 600)
-          this.pub()
-        })
-        if (!install.ok) {
-          this.state.error = `Dependency install failed (code ${String(install.code)}). The merge is applied; fix deps before restarting.`
-          this.log(this.state.error)
-          this.state.lastApplyAt = new Date().toISOString()
-          this.state.lastResult = { ok: false, at: new Date().toISOString(), message: this.state.error }
-          this.setPhase(this.config.requireConsentRestart && this.shouldRestart(plan) ? 'restart-pending' : 'error')
-          return { ok: false, message: this.state.error }
-        }
-      }
-
-      // 9 — rebuild.
-      if (plan.needsRebuild && this.config.buildEnabled) {
-        this.progress('build', `Building (${this.config.buildCommand})…`)
-        const argv = parseCommandLine(this.config.buildCommand)
-        const build = await runLongCommand(repoPath, argv.length > 0 ? argv : ['pnpm', 'run', 'build'], (line) => {
-          this.log(`build: ${line}`)
-          this.state.lastInstallLine = `build: ${line.slice(0, 600)}`
-          this.pub()
-        })
-        if (!build.ok) {
-          this.state.error = `Build failed (code ${String(build.code)}). The merge is applied; rebuild or install with the CLI and restart.`
-          this.log(this.state.error)
-          this.state.lastApplyAt = new Date().toISOString()
-          this.state.lastResult = { ok: false, at: new Date().toISOString(), message: this.state.error }
-          this.setPhase('restart-pending')
-          return { ok: false, message: this.state.error }
-        }
-      }
-
-      // 10 — finalize.
-      this.state.lastApplyAt = new Date().toISOString()
-      this.state.lastResult = { ok: true, at: this.state.lastApplyAt, message: 'Update applied.' }
-      this.state.backupId = backupId
-      this.state.progress = null
-      this.log(`apply: success (${startedAt} → ${new Date().toISOString()})`)
-      if (this.shouldRestart(plan)) {
-        this.state.pendingRestart = true
-        this.setPhase('restart-pending')
-        return { ok: true, message: 'Update applied. DSH needs a restart to activate it.' }
-      }
-      this.setPhase('applied')
-      return { ok: true, message: 'Update applied.' }
+      return await this.finishUpdate()
     } catch (error) {
       this.state.error = `Apply failed: ${error instanceof Error ? error.message : String(error)}`
       this.log(this.state.error)
@@ -589,6 +591,162 @@ export class UpdaterGateway extends TypertRemoteService {
       this.state.inProgress = false
       this.pub()
     }
+  }
+
+  /** Enabled Loader modules form the preservation baseline, independent of model. */
+  private pluginNames(): string[] {
+    const loader = this.ctx.get('loader')
+    if (!loader) return []
+    return [...new Set([...loader.entries()].filter(entry => !entry.options.group && !entry.disabled)
+      .map(entry => entry.options.name).filter((name): name is string => typeof name === 'string'))].sort()
+  }
+
+  /** Continue the shared draft/build/check path after either kind of merge. */
+  private async finishUpdate(): Promise<UpdaterAction> {
+    const repo = this.config.repoPath
+    const previousLock = this.applying.value
+    this.applying.value = true
+    this.state.inProgress = true
+    try {
+      let operation = readOperation(repo)
+      if (!operation) {
+        operation = { version: 1, id: new Date().toISOString(), targetSha: this.state.upstreamSha!,
+          backupId: this.state.backupId, stage: 'drafts', appliedDraftRefs: [], applyingDraftRef: null,
+          expectedPlugins: this.pluginNames(), checks: [], initiatorId: this.initiatorId, restartAuthorized: false }
+        saveOperation(repo, operation)
+      }
+      if (readMergeHead(repo)) return { ok: false, message: 'The merge still needs repair.' }
+      const included = await runGit(repo, ['merge-base', '--is-ancestor', operation.targetSha, 'HEAD'])
+      if (included.code !== 0) throw new Error('The pinned update has not been merged. Resume the merge before verification.')
+      if (operation.applyingDraftRef) throw new Error('Draft restoration was interrupted. Inspect the preserved draft before resuming; it will not be applied twice.')
+      operation.stage = 'drafts'
+      saveOperation(repo, operation)
+      for (const ref of [...this.state.stashRefs].reverse()) {
+        if (operation.appliedDraftRefs.includes(ref)) continue
+        this.progress('restore-drafts', 'Restoring your saved changes…')
+        operation.applyingDraftRef = ref
+        saveOperation(repo, operation)
+        const result = await runGit(repo, ['stash', 'apply', ref], { timeoutMs: 120_000 })
+        const conflicts = await unmergedPaths(repo)
+        if (result.code !== 0 && conflicts.length === 0) throw new Error(`Saved changes could not be restored: ${result.stderr}`)
+        operation.appliedDraftRefs.push(ref)
+        operation.applyingDraftRef = null
+        saveOperation(repo, operation)
+        if (conflicts.length) {
+          if (this.config.strategy === 'upstream-overlay') {
+            for (const path of conflicts) {
+              const parked = await writeParkedDraft(repo, stateDirOf(repo), this.state.backupId ?? operation.id, path, ref)
+              if (!parked) throw new Error(`Could not preserve the local draft of ${path}.`)
+              this.state.parkedDrafts.push({ path, parkedAt: new Date().toISOString(), stashRef: ref, parkedFile: parked.parkedFile })
+              const restored = await runGit(repo, ['restore', '--source=HEAD', '--staged', '--worktree', '--', path])
+              if (restored.code !== 0) throw new Error(`Could not restore the upstream version of ${path}.`)
+            }
+            continue
+          }
+          this.state.conflictedFiles = conflicts
+          this.state.error = null
+          this.setPhase('conflicts')
+          return { ok: false, message: 'Your saved changes need an automatic compatibility repair. Read the conflict context and write the merged files, then resume.' }
+        }
+      }
+      this.state.conflictedFiles = await unmergedPaths(repo)
+      if (this.state.conflictedFiles.length) { this.setPhase('conflicts'); return { ok: false, message: 'Compatibility repairs are still needed.' } }
+      operation.stage = 'verify'
+      operation.checks = []
+      saveOperation(repo, operation)
+      const check = async (name: string, argv: string[]): Promise<void> => {
+        this.progress(name, name === 'build' ? 'Preparing the updated app…' : 'Checking the updated app…')
+        const result = await runLongCommand(repo, argv, line => { this.log(`${name}: ${line}`); this.pub() })
+        operation!.checks.push({ name, status: result.ok ? 'passed' : 'failed', detail: result.ok ? 'Completed' : `Exit ${result.code}; timeout ${result.timedOut}` })
+        saveOperation(repo, operation!)
+        if (!result.ok) throw new Error(`${name} did not pass. The recovery copy and saved changes have been retained.`)
+      }
+      if (this.state.plan?.needsInstall && this.config.installDeps) await check('install', ['pnpm', 'install', '--no-frozen-lockfile'])
+      if (this.state.plan?.needsRebuild && this.config.buildEnabled) {
+        for (const command of commandSteps(this.config.buildCommand)) await check('build', parseCommandLine(command))
+      }
+      if (this.config.verifyCommand.trim()) {
+        for (const command of commandSteps(this.config.verifyCommand)) await check('application-checks', parseCommandLine(command))
+      }
+      this.state.currentSha = await resolveHead(repo)
+      this.state.currentVersion = readLocalVersion(repo)
+      this.state.behind = 0
+      this.state.error = null
+      this.state.progress = null
+      this.state.lastApplyAt = new Date().toISOString()
+      operation.stage = this.shouldRestart(this.state.plan) ? 'restart' : 'complete'
+      saveOperation(repo, operation)
+      this.state.lastResult = { ok: operation.stage === 'complete', at: this.state.lastApplyAt,
+        message: operation.stage === 'complete' ? 'Update verified.' : 'Local checks passed; checking the restarted app is next.' }
+      this.state.pendingRestart = operation.stage === 'restart'
+      this.setPhase(operation.stage === 'restart' ? 'restart-pending' : 'applied')
+      return { ok: true, message: this.state.lastResult.message }
+    } catch (error) {
+      this.state.error = error instanceof Error ? error.message : String(error)
+      this.setPhase('error')
+      return { ok: false, message: this.state.error }
+    } finally {
+      this.applying.value = previousLock
+      this.state.inProgress = previousLock
+      this.pub()
+    }
+  }
+
+  /** Start or resume one user-authorized update, retaining the selected model. */
+  @Remote('start')
+  async start(): Promise<UpdaterAction> {
+    if (this.applying.value || this.checking.value) return { ok: true, message: 'The update is already running.' }
+    this.authorizedRun = true
+    const agents = this.ctx.get('agents')
+    try { this.initiatorId = agents?.requireInitiator().session.id ?? null } catch { this.initiatorId = null }
+    const operation = readOperation(this.config.repoPath)
+    if (!operation && this.state.stashRefs.length) {
+      return { ok: false, message: 'An older updater left saved drafts without a restoration checkpoint. Inspect the retained stash and recovery copy against the working tree, then repair the checkpoint before starting another update. No saved drafts have been discarded.' }
+    }
+    if (operation && !['complete', 'recovered'].includes(operation.stage)) {
+      this.state.conflictedFiles = await unmergedPaths(this.config.repoPath)
+      operation.restartAuthorized = true
+      operation.initiatorId = this.initiatorId ?? operation.initiatorId
+      saveOperation(this.config.repoPath, operation)
+      if (operation.stage === 'restart') return this.runRestart()
+      if (this.state.conflictedFiles.length) return { ok: false, message: 'Read the conflict context, preserve local behavior, write the repairs, then resume.' }
+      if (readMergeHead(this.config.repoPath)) {
+        const commit = await runGit(this.config.repoPath, ['commit', '--no-edit'])
+        if (commit.code !== 0) return { ok: false, message: 'The repaired merge could not be committed. Fix the reported repository checks and resume.' }
+      }
+      if (operation.stage === 'merge') {
+        if (!operation.backupId) {
+          void this.runApply()
+          return { ok: true, message: 'Retrying update preparation with a new recovery checkpoint.' }
+        }
+        const merged = await runGit(this.config.repoPath, ['merge-base', '--is-ancestor', operation.targetSha, 'HEAD'])
+        if (merged.code !== 0) {
+          const result = await runGit(this.config.repoPath, ['merge', '--no-edit', operation.targetSha], { timeoutMs: 120_000 })
+          this.state.conflictedFiles = await unmergedPaths(this.config.repoPath)
+          if (result.code !== 0) {
+            this.state.error = this.state.conflictedFiles.length ? null : result.stderr
+            this.setPhase(this.state.conflictedFiles.length ? 'conflicts' : 'error')
+            return { ok: false, message: 'The pinned merge needs repair before draft restoration can resume.' }
+          }
+        }
+      }
+      void this.finishUpdate().then(result => { if (result.ok && this.state.pendingRestart) void this.runRestart() })
+      return { ok: true, message: 'Resuming the update and its checks.' }
+    }
+    void this.runApply().then(result => { if (result.ok && this.state.pendingRestart && this.authorizedRun) void this.runRestart() })
+    return { ok: true, message: 'Updating DSH. Backups, repairs, checks and restart are included.' }
+  }
+
+  /** Return distinct base, fork, incoming and saved-draft sides for a repair. */
+  @Remote('conflictContext')
+  async conflictContext(path: string): Promise<{ path: string; mergePending: boolean; base: string; local: string; incoming: string; draft: string | null }> {
+    if (!UpdaterGateway.validRelPath(path) || !this.state.conflictedFiles.includes(path)) throw new Error('Not a current conflict path.')
+    const repo = this.config.repoPath
+    const sides = await Promise.all([1, 2, 3].map(stage => runGit(repo, ['show', `:${stage}:${path}`])))
+    const draft = await this.localDraft(path)
+    const mergePending = readMergeHead(repo) !== null
+    return { path, mergePending, base: sides[0]!.stdout,
+      local: sides[mergePending ? 1 : 2]!.stdout, incoming: sides[mergePending ? 2 : 1]!.stdout, draft: draft.content }
   }
 
   private bumpForApply(): void {
@@ -747,6 +905,12 @@ export class UpdaterGateway extends TypertRemoteService {
     if (this.state.phase !== 'restart-pending' && !this.state.pendingRestart) {
       return { ok: false, message: 'There is no restart pending.' }
     }
+    const operation = readOperation(this.config.repoPath)
+    if (this.state.error || (operation && operation.stage !== 'restart')) return { ok: false, message: 'Verification must finish before restarting.' }
+    const agents = this.ctx.get('agents')
+    if (agents?.list().some(agent => agent.status === 'running' && agent.session.id !== operation?.initiatorId)) {
+      return { ok: false, message: 'Waiting for your other conversations to finish. Resume the update afterward.' }
+    }
     const arm = armSupervisor(this.config)
     if (!arm.ok) return arm
     this.state.pendingRestart = true
@@ -840,11 +1004,22 @@ export class UpdaterGateway extends TypertRemoteService {
         writeFileSync(dst, blob.stdout, 'utf8')
         await runGit(repoPath, ['add', '--', path], { timeoutMs: 30_000 })
       } else if (choice === 'take-upstream') {
-        const co = await runGit(repoPath, ['checkout', 'HEAD', '--', path], { timeoutMs: 30_000 })
+        // FORK-MERGE: during a mid-merge conflict, HEAD is still the
+        // pre-merge fork commit, so `checkout HEAD -- path` would restore the
+        // FORK version — the exact opposite of the requested resolution. Use
+        // MERGE_HEAD (the incoming upstream commit) while a merge is in
+        // flight; fall back to HEAD for the stash-pop conflict case.
+        const midMergeSha = readMergeHead(repoPath)
+        const upstreamSide = midMergeSha !== null ? midMergeSha : 'HEAD'
+        const co = await runGit(repoPath, ['checkout', upstreamSide, '--', path], { timeoutMs: 30_000 })
         if (co.code !== 0) return { ok: false, message: `Cannot restore the upstream version of "${path}".` }
         await runGit(repoPath, ['add', '--', path], { timeoutMs: 30_000 })
       } else if (choice === 'keep-both') {
-        const co = await runGit(repoPath, ['checkout', 'HEAD', '--', path], { timeoutMs: 30_000 })
+        // Same mid-merge subtlety: the "upstream" side of a fork-merge
+        // conflict is MERGE_HEAD, not HEAD (HEAD is the fork side).
+        const midMergeSha = readMergeHead(repoPath)
+        const upstreamSide = midMergeSha !== null ? midMergeSha : 'HEAD'
+        const co = await runGit(repoPath, ['checkout', upstreamSide, '--', path], { timeoutMs: 30_000 })
         if (co.code !== 0) return { ok: false, message: `Cannot restore the upstream version of "${path}".` }
         await runGit(repoPath, ['add', '--', path], { timeoutMs: 30_000 })
         if (stashRef !== null) {
@@ -864,23 +1039,42 @@ export class UpdaterGateway extends TypertRemoteService {
       )]
       this.log(`resolve: ${path} → ${choice}`)
       if (this.state.conflictedFiles.length === 0) {
-        // Hardening: drop the stash(es) that held the now-resolved draft(s) so they don't accumulate across updates.
-        // The backup's local.patch remains the canonical restore path; stashes are ephemeral conflict storage.
-        try { await dropApplyStashes(repoPath, this.state.stashRefs) } catch { /* best effort */ }
-        this.state.stashRefs = []
-        this.state.stashCount = 0
-        this.state.backupId = null
-        this.state.error = null
-        this.state.progress = null
-        this.state.lastApplyAt = new Date().toISOString()
-        this.state.lastResult = { ok: true, at: this.state.lastApplyAt, message: 'Conflicts resolved; update applied.' }
-        if (this.shouldRestart(this.state.plan)) {
-          this.state.pendingRestart = true
-          this.setPhase('restart-pending')
-        } else {
-          this.setPhase('applied')
+        // FORK-MERGE completion (2026-09-01): if this conflicts phase came
+        // from a fork merge (MERGE_HEAD still present), commit the merge now
+        // with the resolved index. Without this the merge stays unfinished —
+        // HEAD never advances and the updater reports success while the repo
+        // is mid-merge.
+        const midMerge = readMergeHead(repoPath)
+        if (midMerge !== null) {
+          const commit = await runGit(
+            repoPath,
+            ['commit', '--no-edit', '--no-verify'],
+            { timeoutMs: 60_000 },
+          )
+          if (commit.code !== 0) {
+            this.state.error = `Cannot finish the fork merge: ${commit.stderr.trim() || commit.stdout.trim() || 'unknown'}`
+            this.log(this.state.error)
+            this.setPhase('error')
+            return { ok: false, message: this.state.error }
+          }
+          this.log('resolve: fork merge committed')
+          // Fork merge done: upstream must now be an ancestor of HEAD.
+          const ancestor = await runGit(
+            repoPath,
+            ['merge-base', '--is-ancestor', readOperation(repoPath)?.targetSha ?? `${this.config.remoteName}/${this.config.branch}`, 'HEAD'],
+            { timeoutMs: 20_000 },
+          )
+          if (ancestor.code !== 0) {
+            this.state.error = 'Fork merge finished but upstream is not in history; review the repository.'
+            this.log(this.state.error)
+            this.setPhase('error')
+            return { ok: false, message: this.state.error }
+          }
+          // The merge commit means the upstream version is in history; take-
+          // upstream/keep-both resolved content, and keep-local deliberately
+          // kept the fork draft. Either way the update is complete.
         }
-        return { ok: true, message: 'Conflict resolved. The update is now complete.' }
+        return await this.finishUpdate()
       }
       this.pub()
       return { ok: true, message: `Resolved "${path}". ${this.state.conflictedFiles.length} file(s) still need attention.` }
@@ -962,22 +1156,35 @@ export class UpdaterGateway extends TypertRemoteService {
       )]
       this.log(`resolve: ${path} → write-merged (agent-authored)`)
       if (this.state.conflictedFiles.length === 0) {
-        // Hardening: same stash cleanup as resolveConflict — the agent-authored merge resolved the last conflict, so the stashed draft is no longer needed.
-        try { await dropApplyStashes(repoPath, this.state.stashRefs) } catch { /* best effort */ }
-        this.state.stashRefs = []
-        this.state.stashCount = 0
-        this.state.backupId = null
-        this.state.error = null
-        this.state.progress = null
-        this.state.lastApplyAt = new Date().toISOString()
-        this.state.lastResult = { ok: true, at: this.state.lastApplyAt, message: 'Merged content written; update applied.' }
-        if (this.shouldRestart(this.state.plan)) {
-          this.state.pendingRestart = true
-          this.setPhase('restart-pending')
-        } else {
-          this.setPhase('applied')
+        // FORK-MERGE completion: same as resolveConflict — commit the pending
+        // merge so HEAD advances past the merge (see resolveConflict notes).
+        const midMerge = readMergeHead(repoPath)
+        if (midMerge !== null) {
+          const commit = await runGit(
+            repoPath,
+            ['commit', '--no-edit', '--no-verify'],
+            { timeoutMs: 60_000 },
+          )
+          if (commit.code !== 0) {
+            this.state.error = `Cannot finish the fork merge: ${commit.stderr.trim() || commit.stdout.trim() || 'unknown'}`
+            this.log(this.state.error)
+            this.setPhase('error')
+            return { ok: false, message: this.state.error }
+          }
+          this.log('resolve: fork merge committed (write-merged path)')
+          const ancestor = await runGit(
+            repoPath,
+            ['merge-base', '--is-ancestor', readOperation(repoPath)?.targetSha ?? `${this.config.remoteName}/${this.config.branch}`, 'HEAD'],
+            { timeoutMs: 20_000 },
+          )
+          if (ancestor.code !== 0) {
+            this.state.error = 'Fork merge finished but upstream is not in history; review the repository.'
+            this.log(this.state.error)
+            this.setPhase('error')
+            return { ok: false, message: this.state.error }
+          }
         }
-        return { ok: true, message: 'Merged content written. The update is now complete.' }
+        return await this.finishUpdate()
       }
       this.pub()
       return { ok: true, message: `Merged "${path}". ${this.state.conflictedFiles.length} file(s) still need attention.` }

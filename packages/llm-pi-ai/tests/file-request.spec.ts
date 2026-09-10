@@ -46,12 +46,12 @@ function userMessage(content: readonly unknown[]): Message {
 
 describe('extractDocxText', () => {
   it('flattens paragraphs, tabs, breaks, and table cells in document order', () => {
-    const body = '<w:p><w:r><w:t xml:space="preserve">Stefan&apos;s &amp; Co.</w:t></w:r></w:p>'
+    const body = '<w:p><w:r><w:t xml:space="preserve">Example&apos;s &amp; Co.</w:t></w:r></w:p>'
       + '<w:p><w:r><w:t>Second</w:t></w:r><w:r><w:tab/><w:t>after tab</w:t><w:br/><w:t>new line</w:t></w:r></w:p>'
       + '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>cell A</w:t></w:r></w:p></w:tc>'
       + '<w:tc><w:p><w:r><w:t>cell B</w:t></w:r></w:p></w:tc></w:tr></w:tbl>'
     expect(extractDocxText(docxBytes(body))).toBe(
-      "Stefan's & Co.\nSecond\tafter tab\nnew line\ncell A\tcell B",
+      "Example's & Co.\nSecond\tafter tab\nnew line\ncell A\tcell B",
     )
   })
 

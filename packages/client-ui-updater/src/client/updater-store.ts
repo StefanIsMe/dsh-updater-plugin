@@ -3,8 +3,6 @@
  * holder fed by status() polling and the forwarded `updater/state` event.
  * @module @deepseek-ai/dsh-client-ui-updater/client
  */
-
-import type { ClientRemote } from '@deepseek-ai/dsh-api-remotes/client'
 import type {
   UpdaterAction, UpdaterConfigView, UpdaterSnapshot,
 } from '@deepseek-ai/dsh-host-updater/types'
@@ -14,11 +12,21 @@ import type {
  * resolves to the standard `RemoteResult` envelope (`{ ok: true, value }` on
  * success, `{ ok: false, error }` on carrier failure) — the store unwraps it
  * below; callers of the binding never see the envelope.
+ *
+ * NOTE: Previously typed as Pick<ClientRemote['updater'], ...> but
+ * @deepseek-ai/dsh-api-remotes does not currently assemble the host-updater
+ * remote (it is a local workspace package not listed as a remotes dependency).
+ * Define the face directly to avoid a hard dependency on the assembly order.
  */
-export type UpdaterRemoteFace = Pick<
-  ClientRemote['updater'],
-  'status' | 'check' | 'apply' | 'restore' | 'setConfig' | 'restart' | 'refresh'
->
+export type UpdaterRemoteFace = {
+  status(): Promise<UpdaterRemoteResult<UpdaterSnapshot>>
+  check(): Promise<UpdaterRemoteResult<UpdaterAction>>
+  apply(): Promise<UpdaterRemoteResult<UpdaterAction>>
+  restore(backupId: string): Promise<UpdaterRemoteResult<UpdaterAction>>
+  setConfig(patch: Partial<UpdaterConfigView>): Promise<UpdaterRemoteResult<UpdaterAction>>
+  restart(): Promise<UpdaterRemoteResult<UpdaterAction>>
+  refresh(): Promise<UpdaterRemoteResult<void>>
+}
 
 /** Error envelope of one failed Remote call (carrier-reported). */
 export interface UpdaterRemoteFailure {
