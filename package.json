@@ -11,13 +11,7 @@
     "deepseek-harness",
     "self-updater",
     "auto-update",
-    "draft-preserving",
-    "file-attachment",
-    "paperclip",
-    "docx",
-    "pdf",
-    "document-extraction",
-    "llm"
+    "draft-preserving"
   ],
   "license": "MIT",
   "repository": {
@@ -26,7 +20,8 @@
   },
   "author": "",
   "workspaces": [
-    "packages/*"
+    "packages/host-updater",
+    "packages/client-ui-updater"
   ],
   "scripts": {}
 }

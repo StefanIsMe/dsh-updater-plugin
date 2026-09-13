@@ -46,6 +46,6 @@ Recovery copies and stashes can contain private user data. They stay in the user
 
 ## Development and scope
 
-The updater code lives in `packages/host-updater` and `packages/client-ui-updater`. The older optional file attachment/provider sources in this repository are separate integrations; installing the updater does not require installing them.
+The updater code lives in `packages/host-updater` and `packages/client-ui-updater`. This repository contains only the updater.
 
 Tests run in the target DSH workspace because this source kit references DSH workspace packages and its TypeScript/build configuration. Follow the version-specific commands in [docs/INSTALL.md](docs/INSTALL.md). The repository's GitHub URL necessarily identifies its public owner; private paths, email addresses, credentials and conversation records are not installation inputs.
